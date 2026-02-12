@@ -554,30 +554,40 @@ function App() {
       <main className={styles.main}>
         {showInitialDropZones ? (
           /* Initial state: two drop zones side by side */
-          <div className={styles.dropZoneRow}>
-            <div className={styles.dropZoneContainer}>
-              {!videoFile ? (
-                <VideoDropZone onVideoLoaded={handleVideoLoaded} />
-              ) : (
-                <div className={styles.videoPreview}>
-                  <VideoPlayer
-                    ref={videoPlayerRef}
-                    videoFile={videoFile}
-                    videoPath={videoPath}
-                    subtitles={[]}
-                    displayMode={displayMode}
-                    onTimeUpdate={setCurrentTime}
-                    onDurationChange={setDuration}
-                  />
-                </div>
-              )}
-            </div>
-            <div className={styles.dropZoneContainer}>
-              <SrtDropZone
-                onFileLoaded={handleSrtLoaded}
-                hasSubtitles={false}
-                fileName=""
-              />
+          <div className={styles.initialView}>
+            {videoFile && (
+              <button
+                onClick={isTauri() ? handleBackToProjects : handleReset}
+                className={styles.backButton}
+              >
+                &larr; {isTauri() ? 'Back to Projects' : 'Home'}
+              </button>
+            )}
+            <div className={styles.dropZoneRow}>
+              <div className={styles.dropZoneContainer}>
+                {!videoFile ? (
+                  <VideoDropZone onVideoLoaded={handleVideoLoaded} />
+                ) : (
+                  <div className={styles.videoPreview}>
+                    <VideoPlayer
+                      ref={videoPlayerRef}
+                      videoFile={videoFile}
+                      videoPath={videoPath}
+                      subtitles={[]}
+                      displayMode={displayMode}
+                      onTimeUpdate={setCurrentTime}
+                      onDurationChange={setDuration}
+                    />
+                  </div>
+                )}
+              </div>
+              <div className={styles.dropZoneContainer}>
+                <SrtDropZone
+                  onFileLoaded={handleSrtLoaded}
+                  hasSubtitles={false}
+                  fileName=""
+                />
+              </div>
             </div>
           </div>
         ) : (

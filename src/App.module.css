@@ -29,13 +29,22 @@
   margin: 0 auto;
 }
 
+/* Initial view with back button + drop zones */
+.initialView {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  height: calc(100vh - 180px);
+  min-height: 400px;
+}
+
 /* Initial drop zone row */
 .dropZoneRow {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 24px;
-  height: calc(100vh - 180px);
-  min-height: 400px;
+  flex: 1;
+  min-height: 0;
 }
 
 .dropZoneContainer {

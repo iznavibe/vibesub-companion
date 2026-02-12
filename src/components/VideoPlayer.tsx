@@ -160,7 +160,7 @@ export const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(
         <div className={styles.videoWrapper}>
           {error ? (
             <div className={styles.error}>{error}</div>
-          ) : (
+          ) : videoUrl ? (
             <video
               ref={videoRef}
               className={styles.video}
@@ -170,6 +170,8 @@ export const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(
               onLoadedMetadata={handleLoadedMetadata}
               onError={handleError}
             />
+          ) : (
+            <div className={styles.loading}>Loading video...</div>
           )}
           {currentSubtitle && !error && (
             <div className={styles.subtitleOverlay}>
