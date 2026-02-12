@@ -23,6 +23,7 @@ pub fn run() {
         .manage(app_state)
         .invoke_handler(tauri::generate_handler![
             commands::file::get_app_data_dir,
+            commands::waveform::extract_waveform,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

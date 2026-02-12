@@ -29,6 +29,9 @@ tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
+# Audio waveform extraction
+symphonia = { version = "0.5", features = ["mp3", "aac", "isomp4", "mkv", "ogg", "flac", "wav", "pcm", "vorbis", "alac"] }
+
 # Utilities
 thiserror = "1"
 log = "0.4"

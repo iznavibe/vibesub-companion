@@ -22,19 +22,27 @@ export function useWaveformData(
 
     async function extractWaveform() {
       try {
-        let arrayBuf: ArrayBuffer;
-
+        // In Tauri, use the native Rust command for fast, reliable extraction
         if (isTauri() && videoPath) {
-          // In Tauri, the File object is a placeholder (size 0).
-          // Read the actual file via the Tauri FS plugin.
-          const { readFile } = await import('@tauri-apps/plugin-fs');
-          const bytes = await readFile(videoPath);
-          arrayBuf = bytes.buffer as ArrayBuffer;
-        } else {
-          // Browser: read directly from File
-          arrayBuf = await videoFile!.arrayBuffer();
+          const { invoke } = await import('@tauri-apps/api/core');
+          const result = await invoke<{ peaks: number[]; duration: number }>(
+            'extract_waveform',
+            { path: videoPath, peaksPerSecond: 50 }
+          );
+
+          if (!cancelled && result.peaks.length > 0) {
+            setWaveformData({
+              peaks: new Float32Array(result.peaks),
+              duration: result.duration,
+            });
+          }
+          return;
         }
 
+        // Browser fallback: Web Audio API
+        if (!videoFile || videoFile.size === 0) return;
+
+        const arrayBuf = await videoFile.arrayBuffer();
         if (cancelled) return;
 
         const audioCtx = new AudioContext();
@@ -43,7 +51,6 @@ export function useWaveformData(
         try {
           audioBuffer = await audioCtx.decodeAudioData(arrayBuf);
         } catch {
-          // Some video formats can't be decoded — fail silently
           audioCtx.close();
           return;
         }
@@ -56,7 +63,6 @@ export function useWaveformData(
         const channelData = audioBuffer.getChannelData(0);
         const audioDuration = audioBuffer.duration;
 
-        // ~50 peaks/sec gives word-level detail for speech waveforms
         const peaksPerSecond = 50;
         const totalPeaks = Math.ceil(audioDuration * peaksPerSecond);
         if (totalPeaks === 0) {
@@ -70,7 +76,6 @@ export function useWaveformData(
           const start = i * samplesPerPeak;
           const end = Math.min(start + samplesPerPeak, channelData.length);
           if (end <= start) continue;
-          // Use RMS (root mean square) for smoother, speech-shaped waveform
           let sumSq = 0;
           for (let j = start; j < end; j++) {
             sumSq += channelData[j] * channelData[j];
@@ -78,7 +83,6 @@ export function useWaveformData(
           peaks[i] = Math.sqrt(sumSq / (end - start));
         }
 
-        // Normalize peaks so the loudest point fills the full height
         let maxPeak = 0;
         for (let i = 0; i < totalPeaks; i++) {
           if (peaks[i] > maxPeak) maxPeak = peaks[i];
