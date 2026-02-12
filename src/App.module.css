@@ -1,0 +1,320 @@
+.app {
+  min-height: 100vh;
+  padding: 20px;
+}
+
+.header {
+  text-align: center;
+  margin-bottom: 24px;
+}
+
+.title {
+  font-size: 28px;
+  font-weight: 700;
+  color: #eaeaea;
+  margin-bottom: 4px;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.subtitle {
+  font-size: 14px;
+  color: #8888a8;
+}
+
+.main {
+  max-width: 1800px;
+  margin: 0 auto;
+}
+
+/* Initial drop zone row */
+.dropZoneRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  height: calc(100vh - 180px);
+  min-height: 400px;
+}
+
+.dropZoneContainer {
+  display: flex;
+  flex-direction: column;
+}
+
+.videoPreview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
+
+/* Main workspace layout */
+.workspace {
+  display: flex;
+  gap: 24px;
+  height: calc(100vh - 140px);
+}
+
+.videoPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  flex-shrink: 0;
+  width: 55%;
+  min-width: 400px;
+  max-width: 900px;
+}
+
+.videoControls {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+  margin-bottom: 6px;
+}
+
+.editorPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background-color: rgba(255, 255, 255, 0.03);
+  border: 1px solid #3a3a5a;
+  border-radius: 8px;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+}
+
+.translateBtn,
+.importBtn,
+.exportBtn,
+.resetBtn {
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.translateBtn {
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  color: white;
+}
+
+.translateBtn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+}
+
+.translateBtn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.exportBtn {
+  background-color: #10b981;
+  color: white;
+}
+
+.exportBtn:hover:not(:disabled) {
+  background-color: #059669;
+}
+
+.exportBtn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.dropdownArrow {
+  margin-left: 4px;
+  font-size: 10px;
+}
+
+.exportWrapper {
+  position: relative;
+}
+
+.exportMenu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  background-color: #1a1a2e;
+  border: 1px solid #3a3a5a;
+  border-radius: 6px;
+  overflow: hidden;
+  z-index: 100;
+  min-width: 160px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.exportMenuItem {
+  display: block;
+  width: 100%;
+  padding: 10px 14px;
+  font-size: 13px;
+  color: #eaeaea;
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.exportMenuItem:hover {
+  background-color: rgba(99, 102, 241, 0.2);
+}
+
+.exportMenuItem:not(:last-child) {
+  border-bottom: 1px solid #3a3a5a;
+}
+
+.importBtn {
+  background: linear-gradient(135deg, #8b5cf6, #a78bfa);
+  color: white;
+}
+
+.importBtn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(139, 92, 246, 0.3);
+}
+
+.importBtn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.resetBtn {
+  background-color: transparent;
+  color: #8888a8;
+  border: 1px solid #3a3a5a;
+}
+
+.resetBtn:hover {
+  background-color: rgba(255, 255, 255, 0.05);
+  color: #eaeaea;
+}
+
+.modelSection {
+  background-color: rgba(255, 255, 255, 0.03);
+  border: 1px solid #3a3a5a;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.modelToggle {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  padding: 10px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #a0a0c0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.modelToggle:hover {
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+.toggleArrow {
+  font-size: 10px;
+  transition: transform 0.2s ease;
+}
+
+.toggleArrow.open {
+  transform: rotate(180deg);
+}
+
+.modelContent {
+  padding: 12px 16px;
+  border-top: 1px solid #3a3a5a;
+}
+
+.error {
+  padding: 10px 14px;
+  background-color: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 6px;
+  color: #ef4444;
+  font-size: 13px;
+}
+
+.placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  border: 1px dashed #3a3a5a;
+  border-radius: 8px;
+  color: #5a5a7a;
+  font-size: 14px;
+}
+
+/* New project container */
+.newProjectContainer {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  height: calc(100vh - 180px);
+  min-height: 400px;
+}
+
+.backButton {
+  align-self: flex-start;
+  padding: 8px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #8888a8;
+  background: transparent;
+  border: 1px solid #3a3a5a;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.backButton:hover {
+  color: #eaeaea;
+  background-color: rgba(255, 255, 255, 0.05);
+  border-color: #5a5a7a;
+}
+
+@media (max-width: 1200px) {
+  .workspace {
+    flex-direction: column;
+    height: auto;
+  }
+
+  .videoPanel {
+    max-width: 100%;
+    width: 100%;
+  }
+
+  .dropZoneRow {
+    grid-template-columns: 1fr;
+    height: auto;
+  }
+}

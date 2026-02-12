@@ -1,0 +1,44 @@
+.container {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.label {
+  font-size: 12px;
+  color: #8888a8;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.buttons {
+  display: flex;
+  background-color: rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+  padding: 3px;
+}
+
+.button {
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #8888a8;
+  background-color: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.button:hover {
+  color: #eaeaea;
+}
+
+.active {
+  background-color: #6366f1;
+  color: white;
+}
+
+.active:hover {
+  color: white;
+}

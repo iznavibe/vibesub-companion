@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+src-tauri/target/
+src-tauri/gen/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+nul
+
+# Logs
+*.log
+
+# Environment
+.env
+.env.local
+
+# TypeScript build info
+tsconfig.tsbuildinfo
+
+# Claude Code
+.claude/
+
+# Large model files
+*.gguf
+*.bin
+*.onnx
+
+# Build scripts (local only)
+build-tauri.bat
+
+# Source icon folder (generated icons are in src-tauri/icons/)
+icon/
