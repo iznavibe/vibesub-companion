@@ -603,6 +603,9 @@ function lcsPairs(a: string[], b: string[]): [number, number][] {
  * That is what makes it safe to fix a typo or add a word to a line you have
  * already timed, instead of having to time it again from scratch.
  */
+/** Smallest span an inserted word is given, so it stays visible and grabbable. */
+const MIN_INSERT = 0.12;
+
 export function editLineText(
   line: KaraokeLine,
   newText: string,
@@ -651,14 +654,41 @@ export function editLineText(
   // Words added before the first survivor borrow time ahead of it.
   if (firstAnchor > 0) {
     const anchor = syllables[firstAnchor];
-    const width = Math.max(0.12, (anchor.end - anchor.start) || 0.25);
-    fillRun(0, firstAnchor, Math.max(0, anchor.start - width * firstAnchor), anchor.start);
+    const needed = MIN_INSERT * firstAnchor;
+    let from = anchor.start - needed;
+    if (from < 0) {
+      // No room before the line starts: take it out of the first word instead,
+      // which is better than leaving the new words with no duration at all.
+      from = 0;
+      const shrunk = Math.max(needed, Math.min(anchor.start + needed, anchor.end - MIN_DURATION));
+      syllables[firstAnchor] = { ...anchor, start: shrunk };
+    }
+    fillRun(0, firstAnchor, from, syllables[firstAnchor].start);
   }
 
   for (let k = 0; k < anchorList.length - 1; k++) {
     const a = anchorList[k];
     const b = anchorList[k + 1];
-    if (b - a > 1) fillRun(a + 1, b, syllables[a].end, syllables[b].start);
+    const count = b - a - 1;
+    if (count <= 0) continue;
+
+    const needed = MIN_INSERT * count;
+    let gapStart = syllables[a].end;
+    const gapEnd = syllables[b].start;
+
+    // Words timed back to back leave no gap to insert into. Borrow from the
+    // word before so the new words are actually draggable rather than
+    // collapsing to zero width — but never shrink that word below a usable
+    // size itself, and never run past the word after.
+    if (gapEnd - gapStart < needed) {
+      const floor = Math.min(syllables[a].start + MIN_INSERT, gapEnd);
+      gapStart = Math.max(floor, Math.min(gapStart, gapEnd - needed));
+      syllables[a] = { ...syllables[a], end: gapStart };
+    }
+
+    // Bounded by the next word, so blocks can never overlap. An over-packed
+    // line ends up with narrow blocks rather than broken ones.
+    fillRun(a + 1, b, gapStart, Math.max(gapStart, gapEnd));
   }
 
   // Words added after the last survivor extend past it.

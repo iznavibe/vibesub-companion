@@ -23,6 +23,8 @@ interface KaraokeLaneProps {
   onSelectLine: (track: number, index: number) => void;
   onDeleteSelection: () => void;
   onSelectionChange: (refs: SyllableRef[]) => void;
+  /** Rename a single word straight from its block on the lane. */
+  onEditSyllable: (ref: SyllableRef, text: string) => void;
 }
 
 const MIN_WINDOW = 0.4;
@@ -62,12 +64,15 @@ export function KaraokeLane({
   onSelectLine,
   onDeleteSelection,
   onSelectionChange,
+  onEditSyllable,
 }: KaraokeLaneProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(800);
   const [view, setView] = useState<{ start: number; end: number }>({ start: 0, end: 0 });
   const [marquee, setMarquee] = useState<{ from: number; to: number } | null>(null);
+  // The block being renamed in place, and its draft text.
+  const [editing, setEditing] = useState<{ key: string; text: string } | null>(null);
 
   const dragRef = useRef<
     | { kind: 'edge'; track: number; line: number; index: number; edge: 'start' | 'end' }
@@ -495,7 +500,9 @@ export function KaraokeLane({
                 const right = timeToX(syl.end);
                 if (right < -40 || left > width + 40) return null;
                 const active = currentTime >= syl.start && currentTime < syl.end;
-                const picked = selectedSet.has(refKey(track, lineIndex, i));
+                const key = refKey(track, lineIndex, i);
+                const isEditing = editing?.key === key;
+                const picked = selectedSet.has(key);
                 const colour = LINE_COLORS[lineIndex % LINE_COLORS.length];
                 const current = track === selectedTrack && lineIndex === selectedLine;
                 return (
@@ -503,6 +510,7 @@ export function KaraokeLane({
                     key={`${l.id}-${i}`}
                     className={[
                       styles.block,
+                      isEditing ? styles.blockEditing : '',
                       current ? '' : styles.blockDim,
                       active ? styles.blockActive : '',
                       picked ? styles.blockSelected : '',
@@ -515,25 +523,72 @@ export function KaraokeLane({
                       borderColor: colour,
                       background: picked ? undefined : `${colour}33`,
                     }}
-                    onPointerDown={(e) => handleBlockPointerDown(e, track, lineIndex, i)}
+                    onPointerDown={(e) => {
+                      if (isEditing) {
+                        e.stopPropagation();
+                        return;
+                      }
+                      handleBlockPointerDown(e, track, lineIndex, i);
+                    }}
                     onPointerMove={handlePointerMove}
                     onPointerUp={endDrag}
                     onPointerCancel={endDrag}
-                    title={`${syl.text.trim()} — ${syl.start.toFixed(2)}s → ${syl.end.toFixed(2)}s`}
+                    onDoubleClick={(e) => {
+                      e.stopPropagation();
+                      setEditing({ key, text: syl.text.trim() });
+                    }}
+                    title={
+                      isEditing
+                        ? undefined
+                        : `${syl.text.trim()} — ${syl.start.toFixed(2)}s -> ${syl.end.toFixed(
+                            2
+                          )}s · double-click to rename`
+                    }
                   >
-                    <span
-                      className={styles.handleLeft}
-                      onPointerDown={(e) => startEdgeDrag(e, track, lineIndex, i, 'start')}
-                      onPointerMove={handlePointerMove}
-                      onPointerUp={endDrag}
-                    />
-                    <span className={styles.blockText}>{syl.text.trim()}</span>
-                    <span
-                      className={styles.handleRight}
-                      onPointerDown={(e) => startEdgeDrag(e, track, lineIndex, i, 'end')}
-                      onPointerMove={handlePointerMove}
-                      onPointerUp={endDrag}
-                    />
+                    {isEditing && editing ? (
+                      <input
+                        className={styles.blockInput}
+                        autoFocus
+                        value={editing.text}
+                        spellCheck={false}
+                        onChange={(e) => setEditing({ key, text: e.target.value })}
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onDoubleClick={(e) => e.stopPropagation()}
+                        onBlur={() => {
+                          const text = editing.text;
+                          setEditing(null);
+                          if (text.trim() !== syl.text.trim()) {
+                            onEditSyllable({ track, line: lineIndex, syllable: i }, text);
+                          }
+                        }}
+                        onKeyDown={(e) => {
+                          e.stopPropagation();
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            (e.target as HTMLInputElement).blur();
+                          } else if (e.key === 'Escape') {
+                            e.preventDefault();
+                            setEditing(null);
+                          }
+                        }}
+                      />
+                    ) : (
+                      <>
+                        <span
+                          className={styles.handleLeft}
+                          onPointerDown={(e) => startEdgeDrag(e, track, lineIndex, i, 'start')}
+                          onPointerMove={handlePointerMove}
+                          onPointerUp={endDrag}
+                        />
+                        <span className={styles.blockText}>{syl.text.trim()}</span>
+                        <span
+                          className={styles.handleRight}
+                          onPointerDown={(e) => startEdgeDrag(e, track, lineIndex, i, 'end')}
+                          onPointerMove={handlePointerMove}
+                          onPointerUp={endDrag}
+                        />
+                      </>
+                    )}
                   </div>
                 );
               })

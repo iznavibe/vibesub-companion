@@ -183,3 +183,23 @@
   pointer-events: none;
   z-index: 1;
 }
+
+.blockEditing {
+  z-index: 4;
+  min-width: 90px;
+  background: #1c1c1c !important;
+  border-color: #5aaaff !important;
+}
+
+.blockInput {
+  width: 100%;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #fff;
+  font-family: inherit;
+  font-size: 12px;
+  text-align: center;
+  padding: 0 3px;
+}

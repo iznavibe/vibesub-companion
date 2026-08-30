@@ -1015,6 +1015,32 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
     [doc, setTracks]
   );
 
+  /**
+   * Rename one word from its block on the lane.
+   *
+   * Rebuilt through the same line edit as the text field, so a rename that adds
+   * or removes words re-segments correctly instead of leaving one block holding
+   * several words.
+   */
+  const handleEditSyllable = useCallback(
+    (ref: SyllableRef, text: string) => {
+      const lines = ref.track === 1 ? doc.value.romaji?.lines ?? [] : doc.value.lines;
+      const line = lines[ref.line];
+      if (!line) return;
+      const original = line.syllables[ref.syllable];
+      if (!original) return;
+      // Syllable texts already carry their own spacing — Korean has none between
+      // blocks — so rejoin without adding any, and keep whatever trailing space
+      // the replaced word had.
+      const trailing = /\s*$/.exec(original.text)?.[0] ?? '';
+      const words = line.syllables.map((sy, i) =>
+        i === ref.syllable ? text.trim() + trailing : sy.text
+      );
+      handleEditLine(ref.track, ref.line, words.join(''));
+    },
+    [doc, handleEditLine]
+  );
+
   /** Break the selected line in two at the selected word. */
   const handleSplitLine = useCallback(() => {
     if (selectedLine === null || selectedSyllable === null) return;
@@ -1386,6 +1412,7 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
             }}
             onDeleteSelection={handleDeleteSelection}
             onSelectionChange={setSelection}
+            onEditSyllable={handleEditSyllable}
           />
 
           <div className={styles.laneTools}>
