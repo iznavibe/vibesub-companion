@@ -1,3 +1,4 @@
+import { strikeColorOf, strikeOffset, strikeWidth } from './karaokeRenderer';
 import {
   annotationWindow,
   KaraokeLine,
@@ -98,7 +99,9 @@ function buildKaraokeRun(
   line: KaraokeLine,
   style: KaraokeStyle,
   lineStart: number,
-  range: { first: number; end: number } = { first: 0, end: line.syllables.length }
+  range: { first: number; end: number } = { first: 0, end: line.syllables.length },
+  /** When the row leaves the screen, which is where a fade-out lands. */
+  lineEnd = lineStart
 ): string {
   const parts: string[] = [];
   const defaultBase = line.baseColor ?? style.baseColor;
@@ -126,7 +129,7 @@ function buildKaraokeRun(
   let activeSung = style.sungColor;
   let activeBaseAlpha = style.baseAlpha ?? 100;
   let activeSungAlpha = style.sungAlpha ?? 100;
-  let activeStrike = false;
+  let activeFade = 0;
 
   // A leading gap before this row's first syllable, so the text can sit unsung
   // on screen before the sweep arrives. Each wrapped row is its own event, so
@@ -146,6 +149,12 @@ function buildKaraokeRun(
     // Emit colour overrides only when they actually change, to keep the file
     // readable and avoid redundant tags.
     const tags: string[] = [];
+    if ((syl.fadeOut ?? 0) !== activeFade) {
+      // The alphas either feed a transform that is starting or have to undo
+      // one that is ending, so neither can be assumed still in effect.
+      activeBaseAlpha = NaN;
+      activeSungAlpha = NaN;
+    }
     if (sung !== activeSung) {
       tags.push(`\\1c${toAssColorTag(sung)}`);
       activeSung = sung;
@@ -164,29 +173,29 @@ function buildKaraokeRun(
       activeBaseAlpha = baseAlpha;
     }
 
-    // Strikeout toggles per run, so only emit it when the state changes.
-    const strike = syl.strike === true;
-    if (strike !== activeStrike) {
-      tags.push(strike ? '\\s1' : '\\s0');
-      activeStrike = strike;
-    }
 
     const sweepEnd =
       style.sweepMode === 'continuous' && next ? Math.max(next.start, syl.start) : syl.end;
 
+    // A fade runs out exactly as the row leaves, so the word goes out gently
+    // instead of being cut. \t animates from whatever alpha is in effect, so
+    // the static alphas above have to be re-stated when it starts or stops —
+    // hence invalidating the trackers rather than trusting them.
+    const fade = syl.fadeOut ?? 0;
+    if (fade !== activeFade) {
+      if (fade > 0) {
+        const t1 = Math.max(0, Math.round((lineEnd - fade - lineStart) * 1000));
+        const t2 = Math.max(t1 + 1, Math.round((lineEnd - lineStart) * 1000));
+        tags.push(`\\t(${t1},${t2},\\1a&HFF&\\2a&HFF&\\3a&HFF&\\4a&HFF&)`);
+      } else {
+        tags.push('\\3a&H00&\\4a&H00&');
+      }
+      activeFade = fade;
+    }
+
     tags.push(`\\kf${durationTo(sweepEnd)}`);
 
-    // A word carries the space that follows it, so that the sweep crosses the
-    // gap at a steady pace. The rule through the word must stop at the glyphs,
-    // so the space goes out as its own unstruck run inside the same syllable.
-    const trailing = /\s+$/.exec(syl.text)?.[0] ?? '';
-    if (strike && trailing) {
-      const core = syl.text.slice(0, syl.text.length - trailing.length);
-      parts.push(`{${tags.join('')}}${escapeAssText(core)}{\\s0}${escapeAssText(trailing)}`);
-      activeStrike = false;
-    } else {
-      parts.push(`{${tags.join('')}}${escapeAssText(syl.text)}`);
-    }
+    parts.push(`{${tags.join('')}}${escapeAssText(syl.text)}`);
 
     // Hold the fill until the next syllable begins, but only within this row —
     // the gap across a row break belongs to the next row's lead-in.
@@ -210,6 +219,10 @@ export interface AssRowPlacement {
   y: number;
   first: number;
   end: number;
+  /** Left edge of the row, and where each word sits within it. Both are needed
+   *  to put a strikethrough rule where the canvas draws one. */
+  x?: number;
+  boxes?: { index: number; x: number; width: number }[];
 }
 
 export interface AssLinePlacement {
@@ -301,6 +314,21 @@ export function buildAssScript(project: LyricProject, options: AssBuildOptions):
       ' BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
     styleRow('Lyric', style, fontScale),
     styleRow('Romaji', romajiStyle, romajiFontScale),
+    // Strikethrough rules are vector drawings, so everything about the type is
+    // irrelevant; only the fill and the absence of an outline matter.
+    [
+      'Style: Rule',
+      style.fontFamily,
+      20,
+      toAssColor('#FFFFFF'),
+      toAssColor('#FFFFFF'),
+      toAssColor('#000000'),
+      toAssColor('#000000'),
+      0, 0, 0, 0,
+      100, 100, 0, 0,
+      1, 0, 0,
+      7, 0, 0, 0, 1,
+    ].join(','),
     // Annotations are plain text boxes: no karaoke, their own colours.
     [
       'Style: Note',
@@ -377,7 +405,7 @@ export function buildAssScript(project: LyricProject, options: AssBuildOptions):
 
         return rows
           .filter((row) => row.end > row.first)
-          .map((row) => {
+          .flatMap((row) => {
             const overrides: string[] = [
               `\\pos(${Math.round(x)},${Math.round(row.y + line.offsetY)})`,
             ];
@@ -385,11 +413,58 @@ export function buildAssScript(project: LyricProject, options: AssBuildOptions):
               overrides.push(`\\fs${Math.round(size * scale)}`);
             }
 
-            const run = buildKaraokeRun(line, trackStyle, appear, row);
+            const run = buildKaraokeRun(line, trackStyle, appear, row, disappear);
             const text = `{${overrides.join('')}}${run}`;
-            return `Dialogue: 0,${toAssTime(appear)},${toAssTime(
+            const event = `Dialogue: 0,${toAssTime(appear)},${toAssTime(
               disappear
             )},${styleName},,0,0,0,,${text}`;
+
+            /*
+             * Strikethrough is drawn as a rectangle rather than left to
+             * libass's own \s1, which picks its own thickness and height and so
+             * cannot be made to match the preview. The canvas has already
+             * measured where each word's glyphs start and end, so the rule goes
+             * exactly there. Emitted after the text so it sits on top of it.
+             */
+            const rules =
+              row.boxes === undefined || row.x === undefined
+                ? []
+                : row.boxes
+                    .filter((box) => line.syllables[box.index]?.strike && box.width > 0.5)
+                    .map((box) => {
+                      const syl = line.syllables[box.index];
+                      // Canvas-space throughout: the placements are already
+                      // in output pixels, and the font scale only corrects the
+                      // Fontsize libass is given, not the geometry around it.
+                      const thickness = strikeWidth(trackStyle, size);
+                      const ruleX = Math.round((row.x ?? 0) + box.x);
+                      const ruleY = Math.round(
+                        row.y +
+                          line.offsetY +
+                          strikeOffset(trackStyle, size) -
+                          thickness / 2
+                      );
+                      const w = Math.round(box.width);
+                      const h = Math.max(1, Math.round(thickness));
+                      const alpha = syl.baseAlpha ?? line.baseAlpha ?? trackStyle.baseAlpha ?? 100;
+                      const fadeMs = Math.round((syl.fadeOut ?? 0) * 1000);
+                      const tags = [
+                        '\\an7',
+                        `\\pos(${ruleX},${ruleY})`,
+                        `\\1c${toAssColorTag(strikeColorOf(trackStyle, line))}`,
+                        `\\1a${toAssAlphaTag(alpha)}`,
+                        '\\bord0',
+                        '\\shad0',
+                        fadeMs > 0 ? `\\fad(0,${fadeMs})` : '',
+                        '\\p1',
+                      ].join('');
+                      return (
+                        `Dialogue: 0,${toAssTime(appear)},${toAssTime(disappear)},Rule,,0,0,0,,` +
+                        `{${tags}}m 0 0 l ${w} 0 l ${w} ${h} l 0 ${h}`
+                      );
+                    });
+
+            return [event, ...rules];
           });
       });
   };
@@ -440,6 +515,10 @@ export function buildAssScript(project: LyricProject, options: AssBuildOptions):
         `\\3c${toAssColorTag(note.outlineColor)}`,
         `\\bord${note.outlineWidth}`,
         `\\b${note.bold ? 1 : 0}`,
+        // Runs out as the box leaves, so it goes gently rather than blinking off.
+        note.fadeOut && note.fadeOut > 0
+          ? `\\fad(0,${Math.round(note.fadeOut * 1000)})`
+          : '',
       ].join('');
 
       // With a sung colour the box fills across its span; without one it just

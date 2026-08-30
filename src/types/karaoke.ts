@@ -19,6 +19,12 @@ export interface KaraokeSyllable {
   /** Opacity percentages, 0-100. Override the line and project defaults. */
   baseAlpha?: number;
   sungAlpha?: number;
+  /**
+   * Seconds this word takes to fade away, ending when its block leaves the
+   * screen. Usually put on the last line of a song so it goes out gently
+   * rather than being cut, but any word can carry it.
+   */
+  fadeOut?: number;
 }
 
 export interface KaraokeLine {
@@ -98,6 +104,11 @@ export interface KaraokeStyle {
    */
   strikeThickness: number;
   strikeHeight: number;
+  /**
+   * Colour of the rule. Unset means it takes the word's own colour, which is
+   * what a strikethrough normally does.
+   */
+  strikeColor?: string;
 
   sweepMode: SweepMode;
 }
@@ -199,6 +210,8 @@ export interface Annotation {
   /** Opacity percentages, before and after the sweep. */
   alpha?: number;
   sungAlpha?: number;
+  /** Seconds the box takes to fade away, ending when it leaves the screen. */
+  fadeOut?: number;
 }
 
 /** A font file the user supplied, used by both the preview and the render. */

@@ -229,6 +229,28 @@ export function sweepProgress(
   return (time - from) / (to - from);
 }
 
+/**
+ * How much of a word's opacity survives at this moment, 0 to 1.
+ *
+ * A fade runs out at the instant the text would leave anyway, so it reads as
+ * the line going out gently rather than being cut. Anything without a fade is
+ * simply 1 and pays nothing.
+ */
+export function fadeFactor(
+  fadeOut: number | undefined,
+  leaves: number | null,
+  time: number,
+  duration: number
+): number {
+  if (!fadeOut || fadeOut <= 0) return 1;
+  const end = leaves ?? duration;
+  if (!Number.isFinite(end)) return 1;
+  const from = end - fadeOut;
+  if (time <= from) return 1;
+  if (time >= end) return 0;
+  return 1 - (time - from) / fadeOut;
+}
+
 export function isLineVisible(line: KaraokeLine, time: number, duration: number): boolean {
   const from = line.appearAt ?? 0;
   const to = line.disappearAt ?? duration;
@@ -404,7 +426,8 @@ export function drawLine(
   style: KaraokeStyle,
   layout: LineLayout,
   time: number,
-  scale: number
+  scale: number,
+  duration = 0
 ) {
   const size = lineFontSize(line, style);
   applyTextStyle(ctx, style, size);
@@ -413,7 +436,7 @@ export function drawLine(
   const sungDefault = line.sungColor ?? style.sungColor;
   const baseAlphaDefault = line.baseAlpha ?? style.baseAlpha ?? 100;
   const sungAlphaDefault = line.sungAlpha ?? style.sungAlpha ?? 100;
-  const strikeThickness = Math.max(1, size * (style.strikeThickness ?? 0.055));
+  const strikeThickness = strikeWidth(style, size);
 
   for (const row of layout.rows) {
     // Each row is drawn as its own string so glyph positions stay exact.
@@ -423,7 +446,7 @@ export function drawLine(
     const bandHeight = size * 3;
     // Both are fractions of the type size, so the rule keeps its proportions
     // when the text is resized.
-    const strikeY = row.originY + size * scaleYOf(style) * (style.strikeHeight ?? 0.5);
+    const strikeY = row.originY + strikeOffset(style, size);
     // Whole-row extent: each pass draws the full row string, clipped.
     const band = {
       x: row.originX - size,
@@ -436,8 +459,9 @@ export function drawLine(
       const syl = line.syllables[box.index];
       const base = syl.baseColor ?? baseDefault;
       const sung = syl.sungColor ?? sungDefault;
-      const baseAlpha = syl.baseAlpha ?? baseAlphaDefault;
-      const sungAlpha = syl.sungAlpha ?? sungAlphaDefault;
+      const fade = fadeFactor(syl.fadeOut, line.disappearAt, time, duration);
+      const baseAlpha = (syl.baseAlpha ?? baseAlphaDefault) * fade;
+      const sungAlpha = (syl.sungAlpha ?? sungAlphaDefault) * fade;
       const left = row.originX + box.x;
       const p = sweepProgress(line, box.index, time, style.sweepMode);
       const { sung: sungBand, unsung } = sweepBands(left, box.width, p);
@@ -448,9 +472,6 @@ export function drawLine(
         ctx.rect(unsung.x, bandTop, unsung.width, bandHeight);
         ctx.clip();
         paintText(ctx, rowText, row.originX, row.originY, base, style, scale, baseAlpha, band);
-        if (syl.strike) {
-          drawStrike(ctx, left, box.inkWidth, strikeY, strikeThickness, base, style, baseAlpha);
-        }
         ctx.restore();
       }
 
@@ -460,13 +481,41 @@ export function drawLine(
         ctx.rect(sungBand.x, bandTop, sungBand.width, bandHeight);
         ctx.clip();
         paintText(ctx, rowText, row.originX, row.originY, sung, style, scale, sungAlpha, band);
-        if (syl.strike) {
-          drawStrike(ctx, left, box.inkWidth, strikeY, strikeThickness, sung, style, sungAlpha);
-        }
         ctx.restore();
+      }
+
+      // Drawn once, over both halves: the rule is a mark on the word rather
+      // than part of the sung text, so it keeps one colour throughout. That is
+      // also the only version the render can reproduce exactly.
+      if (syl.strike) {
+        drawStrike(
+          ctx,
+          left,
+          box.inkWidth,
+          strikeY,
+          strikeThickness,
+          strikeColorOf(style, line),
+          style,
+          baseAlpha
+        );
       }
     }
   }
+}
+
+/** The colour of the strikethrough rule: its own if set, else the unsung text. */
+export function strikeColorOf(style: KaraokeStyle, line?: KaraokeLine): string {
+  return style.strikeColor ?? line?.baseColor ?? style.baseColor;
+}
+
+/** Where the rule sits, as an offset down from the top of the row. */
+export function strikeOffset(style: KaraokeStyle, size: number): number {
+  return size * scaleYOf(style) * (style.strikeHeight ?? 0.5);
+}
+
+/** How thick the rule is, in pixels. */
+export function strikeWidth(style: KaraokeStyle, size: number): number {
+  return Math.max(1, size * (style.strikeThickness ?? 0.055));
 }
 
 /** A struck-through word, outlined to stay legible over busy footage. */
@@ -551,6 +600,7 @@ export function drawAnnotation(
 
   const font = ctx.font;
   const align = ctx.textAlign;
+  const fade = fadeFactor(note.fadeOut, annotationWindow(note, duration).to, time, duration);
 
   /**
    * Outline and fill are built at full strength on their own surface, then
@@ -616,7 +666,7 @@ export function drawAnnotation(
   };
 
   if (!note.sungColor) {
-    paint(note.color, note.alpha ?? 100);
+    paint(note.color, (note.alpha ?? 100) * fade);
     ctx.restore();
     return;
   }
@@ -633,7 +683,7 @@ export function drawAnnotation(
     ctx.beginPath();
     ctx.rect(bands.unsung.x, top, bands.unsung.width, height);
     ctx.clip();
-    paint(note.color, note.alpha ?? 100);
+    paint(note.color, (note.alpha ?? 100) * fade);
     ctx.restore();
   }
   if (bands.sung.width > 0) {
@@ -641,7 +691,7 @@ export function drawAnnotation(
     ctx.beginPath();
     ctx.rect(bands.sung.x, top, bands.sung.width, height);
     ctx.clip();
-    paint(note.sungColor, note.sungAlpha ?? note.alpha ?? 100);
+    paint(note.sungColor, (note.sungAlpha ?? note.alpha ?? 100) * fade);
     ctx.restore();
   }
 
@@ -703,9 +753,19 @@ export interface RowPlacement {
   /** Inclusive first and exclusive last syllable index on this row. */
   first: number;
   end: number;
+  /** Left edge of the row after alignment, and where each word sits in it. */
+  x: number;
+  boxes: PlacedSyllable[];
 }
 
 /** Where one lyric line sits, and where it wraps. */
+export interface PlacedSyllable {
+  index: number;
+  /** Offset from the row's own left edge, and the width of its glyphs. */
+  x: number;
+  width: number;
+}
+
 export interface LinePlacement {
   /** Top edge of the line's first row. */
   y: number;
@@ -819,6 +879,15 @@ export function planLayout(
           y: row.originY,
           first: row.firstSyllable,
           end: layout.rows[i + 1]?.firstSyllable ?? line.syllables.length,
+          // Carried through so the exporter can put a strikethrough rule
+          // exactly where the canvas draws one, rather than leaving it to
+          // libass, which has its own idea of thickness and height.
+          x: row.originX,
+          boxes: row.syllables.map((box) => ({
+            index: box.index,
+            x: box.x,
+            width: box.inkWidth,
+          })),
         })),
       };
       y += layout.height;
@@ -861,7 +930,7 @@ export function drawFrame(
         y += layout.height;
         if (!fits) continue;
         if (!isLineVisible(line, time, duration)) continue;
-        drawLine(ctx, line, style, layout, time, scale);
+        drawLine(ctx, line, style, layout, time, scale, duration);
       }
     }
   });

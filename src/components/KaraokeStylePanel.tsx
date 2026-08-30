@@ -632,35 +632,6 @@ export function KaraokeStylePanel({
         </div>
 
         <div className={styles.row}>
-          <Field label="Strike thickness">
-            <input
-              type="number"
-              className={styles.input}
-              value={Math.round((style.strikeThickness ?? 0.055) * 100)}
-              min={1}
-              max={30}
-              onChange={(e) =>
-                onStyleChange({ strikeThickness: Math.max(0.01, Number(e.target.value) / 100) })
-              }
-            />
-          </Field>
-          <Field label="Strike height">
-            <input
-              type="number"
-              className={styles.input}
-              value={Math.round((style.strikeHeight ?? 0.5) * 100)}
-              min={0}
-              max={120}
-              onChange={(e) => onStyleChange({ strikeHeight: Number(e.target.value) / 100 })}
-            />
-          </Field>
-        </div>
-        <p className={styles.muted}>
-          Both are percentages of the type size. Height 0 sits at the top of the glyphs, 100 on
-          the baseline.
-        </p>
-
-        <div className={styles.row}>
           <Field label="Outline">
             <input
               type="number"
@@ -873,6 +844,74 @@ export function KaraokeStylePanel({
                 <s>Strikethrough</s>
               </button>
             </div>
+            <div className={styles.row}>
+              <Field label="Rule thickness %">
+                <input
+                  type="number"
+                  className={styles.input}
+                  value={Math.round((style.strikeThickness ?? 0.055) * 100)}
+                  min={1}
+                  max={30}
+                  onChange={(e) =>
+                    onStyleChange({
+                      strikeThickness: Math.max(0.01, Number(e.target.value) / 100),
+                    })
+                  }
+                />
+              </Field>
+              <Field label="Rule height %">
+                <input
+                  type="number"
+                  className={styles.input}
+                  value={Math.round((style.strikeHeight ?? 0.5) * 100)}
+                  min={0}
+                  max={120}
+                  onChange={(e) => onStyleChange({ strikeHeight: Number(e.target.value) / 100 })}
+                />
+              </Field>
+            </div>
+            <Field label="Rule colour">
+              <span className={styles.colorRow}>
+                <ColorInput
+                  value={style.strikeColor ?? style.baseColor}
+                  onChange={(v) => onStyleChange({ strikeColor: v })}
+                />
+                <button
+                  className={styles.smallBtn}
+                  onClick={() => onStyleChange({ strikeColor: undefined })}
+                  disabled={!style.strikeColor}
+                  title="Take the word's own colour again"
+                >
+                  Match text
+                </button>
+              </span>
+            </Field>
+            <p className={styles.muted}>
+              Both are percentages of the type size — thickness of the rule, and
+              how far down the glyph it sits (0 is the cap line, 100 the
+              baseline). These three apply to every struck word.
+            </p>
+
+            <Field label="Fade out (s)">
+              <input
+                type="number"
+                className={styles.input}
+                placeholder={mixed((w) => w.fadeOut) ? 'mixed' : '0'}
+                value={shared((w) => w.fadeOut) ?? ''}
+                min={0}
+                step={0.1}
+                onChange={(e) =>
+                  onWordsPatch({
+                    fadeOut: e.target.value === '' ? undefined : Number(e.target.value),
+                  })
+                }
+              />
+            </Field>
+            <p className={styles.muted}>
+              The words fade away over this long, ending exactly as their block
+              leaves — for the last line of a song, or any word that should go
+              out gently rather than being cut.
+            </p>
 
             {wordSpan && (
               <>
@@ -1067,10 +1106,22 @@ export function KaraokeStylePanel({
                 />
               </Field>
             </div>
+            <Field label="Fade out (s)">
+              <input
+                type="number"
+                className={styles.input}
+                value={note.fadeOut ?? 0}
+                min={0}
+                step={0.1}
+                onChange={(e) =>
+                  onNoteChange(note.id, { fadeOut: Math.max(0, Number(e.target.value)) })
+                }
+              />
+            </Field>
             <p className={styles.muted}>
               The box is on screen for this much longer either side, without
               stretching the fill — so a cue can be read before it is due and
-              left up a moment after.
+              left up a moment after. A fade runs out as it leaves.
             </p>
             <div className={styles.row}>
               <Field label="X">
