@@ -82,6 +82,10 @@ interface KaraokeCanvasProps {
   onSelectNote: (id: string | null) => void;
   onNoteChange: (id: string, patch: Partial<Annotation>) => void;
   onDragStart: () => void;
+  /** Rewrite a whole lyric line, edited straight on the video. */
+  onEditLine: (track: number, line: number, text: string) => void;
+  /** The text of a line, for seeding the editor. */
+  lineTextAt: (track: number, line: number) => string;
 }
 
 const HANDLES: { id: Handle; fx: number; fy: number; cursor: string }[] = [
@@ -120,12 +124,18 @@ export function KaraokeCanvas({
   onSelectNote,
   onNoteChange,
   onDragStart,
+  onEditLine,
+  lineTextAt,
 }: KaraokeCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const [viewport, setViewport] = useState({ width: 960, height: 0 });
   // Project-space positions of the guides the dragged box is locked onto.
   const [guides, setGuides] = useState<Guides>({ vertical: null, horizontal: null });
+  // The line being typed on directly over the video, and its draft text.
+  const [editing, setEditing] = useState<{ track: number; line: number; text: string } | null>(
+    null
+  );
   const dragRef = useRef<DragState | null>(null);
 
   const { canvas: spec } = project;
@@ -294,6 +304,39 @@ export function KaraokeCanvas({
       },
     };
     (e.currentTarget as Element).setPointerCapture(e.pointerId);
+  };
+
+  const beginEdit = useCallback(
+    (track: number, line: number) => setEditing({ track, line, text: lineTextAt(track, line) }),
+    [lineTextAt]
+  );
+
+  const commitEdit = useCallback(() => {
+    if (!editing) return;
+    const { track, line, text } = editing;
+    setEditing(null);
+    if (text !== lineTextAt(track, line)) onEditLine(track, line, text);
+  }, [editing, lineTextAt, onEditLine]);
+
+  // Enter opens the selected line for editing, the way a file browser opens a
+  // selected file.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (editing) return;
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (e.key !== 'Enter' || selectedLineIndex === null) return;
+      e.preventDefault();
+      beginEdit(selectedTrack, selectedLineIndex);
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [editing, selectedLineIndex, selectedTrack, beginEdit]);
+
+  const handleCanvasDoubleClick = (e: React.PointerEvent | React.MouseEvent) => {
+    const rect = canvasRef.current!.getBoundingClientRect();
+    const hit = hitLyrics((e.clientX - rect.left) / scale, (e.clientY - rect.top) / scale);
+    if (hit) beginEdit(hit.track, hit.line);
   };
 
   const handleCanvasPointerDown = (e: React.PointerEvent) => {
@@ -596,7 +639,36 @@ export function KaraokeCanvas({
           onPointerMove={handlePointerMove}
           onPointerUp={endDrag}
           onPointerCancel={endDrag}
+          onDoubleClick={handleCanvasDoubleClick}
         />
+
+        {editing && selectedRect && (
+          <input
+            className={styles.lineEditor}
+            autoFocus
+            value={editing.text}
+            spellCheck={false}
+            style={{
+              left: box.left,
+              top: selectedRect.top,
+              width: box.width,
+              height: Math.max(24, style.lineHeight * scale),
+              fontSize: Math.max(11, style.fontSize * scale * 0.9),
+            }}
+            onChange={(e) => setEditing({ ...editing, text: e.target.value })}
+            onBlur={commitEdit}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                commitEdit();
+              } else if (e.key === 'Escape') {
+                e.preventDefault();
+                setEditing(null);
+              }
+            }}
+          />
+        )}
 
         {selectedRect && (
           <div
@@ -681,7 +753,7 @@ export function KaraokeCanvas({
       </div>
       <p className={styles.hint}>
         Drag inside the box to move the lyrics · side handles squish or widen · corner handles
-        resize · click a word to select it
+        resize · click a word to select it, double-click or press Enter to edit the line
       </p>
     </div>
   );

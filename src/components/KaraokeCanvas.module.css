@@ -129,3 +129,17 @@
 .gridLineMajor {
   background: rgba(255, 214, 92, 0.95);
 }
+
+/* Sits over the line being edited, so the words are changed where they appear. */
+.lineEditor {
+  position: absolute;
+  z-index: 6;
+  box-sizing: border-box;
+  background: rgba(16, 16, 16, 0.94);
+  border: 1px solid #5aaaff;
+  border-radius: 3px;
+  color: #fff;
+  font-family: inherit;
+  padding: 2px 8px;
+  outline: none;
+}

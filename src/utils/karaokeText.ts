@@ -837,6 +837,33 @@ export function splitLineAt(
   return [...lines.slice(0, lineIndex), head, tail, ...lines.slice(lineIndex + 1)];
 }
 
+/**
+ * Insert an empty line directly after `lineIndex`, in the same block.
+ *
+ * It carries no syllables until something is typed into it, which is what makes
+ * pressing Enter at the end of a line feel like a text editor rather than a
+ * form.
+ */
+export function insertLineAfter(lines: KaraokeLine[], lineIndex: number): KaraokeLine[] {
+  const anchor = lines[lineIndex];
+  const blank: KaraokeLine = {
+    id: nextLineId(),
+    syllables: [],
+    appearAt: anchor?.appearAt ?? null,
+    disappearAt: anchor?.disappearAt ?? null,
+    offsetX: 0,
+    offsetY: 0,
+    blockId: anchor?.blockId,
+  };
+  return [...lines.slice(0, lineIndex + 1), blank, ...lines.slice(lineIndex + 1)];
+}
+
+/** Drop a line entirely. */
+export function removeLine(lines: KaraokeLine[], lineIndex: number): KaraokeLine[] {
+  if (lineIndex < 0 || lineIndex >= lines.length) return lines;
+  return [...lines.slice(0, lineIndex), ...lines.slice(lineIndex + 1)];
+}
+
 /** Join a line with the one after it, keeping both sets of timings. */
 export function mergeLineWithNext(lines: KaraokeLine[], lineIndex: number): KaraokeLine[] {
   const line = lines[lineIndex];

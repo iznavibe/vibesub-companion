@@ -39,6 +39,10 @@ interface KaraokeStylePanelProps {
   onNoteChange: (id: string, patch: Partial<Annotation>) => void;
   onNoteDelete: (id: string) => void;
   onSelectNote: (id: string | null) => void;
+  hasDefaults: boolean;
+  onSaveDefaults: () => void;
+  onApplyDefaults: () => void;
+  onClearDefaults: () => void;
 }
 
 /** Fonts that ship with Windows and cover Hangul, plus whatever the user installed. */
@@ -114,6 +118,10 @@ export function KaraokeStylePanel({
   onNoteChange,
   onNoteDelete,
   onSelectNote,
+  hasDefaults,
+  onSaveDefaults,
+  onApplyDefaults,
+  onClearDefaults,
 }: KaraokeStylePanelProps) {
   const { background, canvas } = project;
   const romajiOn = !!project.romaji?.enabled;
@@ -354,6 +362,29 @@ export function KaraokeStylePanel({
             Reset scale
           </button>
         </div>
+      </section>
+
+      <section className={styles.section}>
+        <h4 className={styles.heading}>Default look</h4>
+        <p className={styles.muted}>
+          Fonts, sizes, colours, spacing, panel positions and the show/hide timing — everything
+          about how a project looks, and nothing about its words.
+        </p>
+        <div className={styles.buttonRow}>
+          <button className={styles.smallBtn} onClick={onSaveDefaults}>
+            Save this as default
+          </button>
+          <button className={styles.smallBtn} onClick={onApplyDefaults} disabled={!hasDefaults}>
+            Apply to this project
+          </button>
+        </div>
+        {hasDefaults && (
+          <div className={styles.buttonRow}>
+            <button className={styles.smallBtn} onClick={onClearDefaults}>
+              Forget saved default
+            </button>
+          </div>
+        )}
       </section>
 
       <section className={styles.section}>

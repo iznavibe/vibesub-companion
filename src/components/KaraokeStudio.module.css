@@ -515,3 +515,37 @@
   border-color: #5aaaff;
   color: #fff;
 }
+
+.lineRemove {
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  color: #6f6f6f;
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 5px;
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.lineRemove:hover {
+  background: rgba(220, 80, 80, 0.2);
+  color: #ffb3b3;
+}
+
+.lineRemove {
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  color: #6f6f6f;
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 5px;
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.lineRemove:hover {
+  background: rgba(220, 80, 80, 0.2);
+  color: #ffb3b3;
+}

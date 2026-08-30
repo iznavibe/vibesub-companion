@@ -22,7 +22,9 @@ import {
   closeGaps,
   deleteSelection,
   editLineText,
+  insertLineAfter,
   mergeLineWithNext,
+  removeLine,
   splitLineAt,
   distributeEvenly,
   lineText,
@@ -66,6 +68,13 @@ import {
   presetToStyle,
   saveColorPresets,
 } from '../services/colorPresetService';
+import {
+  applyDefaults,
+  clearProjectDefaults,
+  defaultsFromProject,
+  loadProjectDefaults,
+  saveProjectDefaults,
+} from '../services/projectDefaultsService';
 import { isTauri } from '../services/tauriService';
 import styles from './KaraokeStudio.module.css';
 
@@ -90,10 +99,14 @@ function LineTextField({
   value,
   onCommit,
   onFocus,
+  onEnter,
+  autoFocus,
 }: {
   value: string;
   onCommit: (text: string) => void;
   onFocus: () => void;
+  onEnter: () => void;
+  autoFocus?: boolean;
 }) {
   const [draft, setDraft] = useState(value);
   const [editing, setEditing] = useState(false);
@@ -107,6 +120,7 @@ function LineTextField({
       className={styles.lineInput}
       value={editing ? draft : value}
       spellCheck={false}
+      autoFocus={autoFocus}
       onFocus={() => {
         setDraft(value);
         setEditing(true);
@@ -120,7 +134,11 @@ function LineTextField({
       onKeyDown={(e) => {
         if (e.key === 'Enter') {
           e.preventDefault();
-          (e.target as HTMLInputElement).blur();
+          // Commit here rather than through blur, so the new line below can
+          // take the caret immediately.
+          setEditing(false);
+          if (draft.trim() !== value) onCommit(draft);
+          onEnter();
         } else if (e.key === 'Escape') {
           e.preventDefault();
           setDraft(value);
@@ -190,6 +208,9 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
   const [snapEnabled, setSnapEnabled] = useState(true);
   // A block lifted out with its rhythm, for reusing on another verse.
   const [copiedBlock, setCopiedBlock] = useState<CopiedBlock | null>(null);
+  // Which line row should take the caret next, after Enter adds one.
+  const [focusLineIndex, setFocusLineIndex] = useState<number | null>(null);
+  const [hasDefaults, setHasDefaults] = useState(false);
   const [showGrid, setShowGrid] = useState(false);
   const [gridDivisions, setGridDivisions] = useState(3);
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
@@ -242,6 +263,20 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
   useEffect(() => {
     checkFfmpeg().then(setFfmpeg).catch(() => setFfmpeg(null));
   }, []);
+
+  useEffect(() => {
+    loadProjectDefaults()
+      .then((d) => {
+        if (!d) return;
+        setHasDefaults(true);
+        // Only a project that has not been worked on yet: an existing one's
+        // look is a decision already made.
+        if (doc.value.lines.length === 0 && !doc.value.background.mediaPath) {
+          doc.setTransient(applyDefaults(doc.value, d));
+        }
+      })
+      .catch(() => undefined);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     loadColorPresets()
@@ -1039,12 +1074,12 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
         text,
         track === 1 ? 'romaji' : doc.value.latinMode ?? 'word'
       );
+      // A line emptied by clearing its text is kept, not dropped: it is almost
+      // always a line being retyped, and deleting it under the caret is worse
+      // than leaving a blank row the user can remove deliberately.
       const next = lines.map((l, i) => (i === index ? edited : l));
-      const cleaned = next.filter((l) => l.syllables.length > 0);
       setTracks(
-        track === 1
-          ? [doc.value.lines, cleaned]
-          : [cleaned, doc.value.romaji?.lines ?? []]
+        track === 1 ? [doc.value.lines, next] : [next, doc.value.romaji?.lines ?? []]
       );
     },
     [doc, setTracks]
@@ -1166,6 +1201,36 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
     [doc, handleEditLine]
   );
 
+  /** Remember this project's look as the starting point for new ones. */
+  const handleSaveDefaults = useCallback(() => {
+    saveProjectDefaults(defaultsFromProject(current))
+      .then(() => {
+        setHasDefaults(true);
+        setStatus('Saved as the default look for new projects');
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
+  }, [current]);
+
+  const handleClearDefaults = useCallback(() => {
+    clearProjectDefaults()
+      .then(() => {
+        setHasDefaults(false);
+        setStatus('New projects will use the built-in look again');
+      })
+      .catch(() => undefined);
+  }, []);
+
+  /** Pull the saved look onto this project, without touching its words. */
+  const handleApplyDefaults = useCallback(() => {
+    loadProjectDefaults()
+      .then((d) => {
+        if (!d) return;
+        patch(applyDefaults(doc.value, d));
+        setStatus('Applied the saved default look');
+      })
+      .catch(() => undefined);
+  }, [doc, patch]);
+
   const blockOptions = useCallback(
     () => ({
       leadIn: current.blockLeadIn ?? 0,
@@ -1231,6 +1296,34 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
     writeTrackLines(next);
     setStatus(`Retimed this block from ${currentTime.toFixed(2)}s, keeping its words`);
   }, [copiedBlock, selectedLine, currentTime, currentTrackLines, writeTrackLines, blockOptions]);
+
+  /** Add an empty line below, ready to type into. */
+  const handleInsertLine = useCallback(
+    (track: number, index: number) => {
+      const lines = track === 1 ? doc.value.romaji?.lines ?? [] : doc.value.lines;
+      const next = insertLineAfter(lines, index);
+      setTracks(
+        track === 1 ? [doc.value.lines, next] : [next, doc.value.romaji?.lines ?? []]
+      );
+      setSelectedTrack(track);
+      setSelectedLine(index + 1);
+      setSelection([]);
+    },
+    [doc, setTracks]
+  );
+
+  const handleRemoveLine = useCallback(
+    (track: number, index: number) => {
+      const lines = track === 1 ? doc.value.romaji?.lines ?? [] : doc.value.lines;
+      const next = removeLine(lines, index);
+      setTracks(
+        track === 1 ? [doc.value.lines, next] : [next, doc.value.romaji?.lines ?? []]
+      );
+      setSelectedLine(next.length === 0 ? null : Math.min(index, next.length - 1));
+      setSelection([]);
+    },
+    [doc, setTracks]
+  );
 
   /** Break the selected line in two at the selected word. */
   const handleSplitLine = useCallback(() => {
@@ -1505,6 +1598,12 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
             onSelectNote={setSelectedNoteId}
             onNoteChange={(id, p) => handleNoteChange(id, p, true)}
             onDragStart={doc.commit}
+            onEditLine={handleEditLine}
+            lineTextAt={(track, line) => {
+              const lines = track === 1 ? current.romaji?.lines ?? [] : current.lines;
+              const l = lines[line];
+              return l ? lineText(l) : '';
+            }}
           />
           </div>
 
@@ -1950,12 +2049,28 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
                       <span className={timed ? styles.dotTimed : styles.dot} />
                       <LineTextField
                         value={lineText(line)}
+                        autoFocus={focusLineIndex === i}
                         onCommit={(text) => handleEditLine(selectedTrack, i, text)}
                         onFocus={() => {
                           setSelectedLine(i);
                           setSelection([]);
+                          setFocusLineIndex(null);
+                        }}
+                        onEnter={() => {
+                          handleInsertLine(selectedTrack, i);
+                          setFocusLineIndex(i + 1);
                         }}
                       />
+                      <button
+                        className={styles.lineRemove}
+                        title="Remove this line"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleRemoveLine(selectedTrack, i);
+                        }}
+                      >
+                        ×
+                      </button>
                     </li>
                   );
                 })}
@@ -2013,6 +2128,10 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
               onNoteChange={(id, p) => handleNoteChange(id, p)}
               onNoteDelete={handleDeleteNote}
               onSelectNote={setSelectedNoteId}
+              hasDefaults={hasDefaults}
+              onSaveDefaults={handleSaveDefaults}
+              onApplyDefaults={handleApplyDefaults}
+              onClearDefaults={handleClearDefaults}
             />
           )}
         </aside>
