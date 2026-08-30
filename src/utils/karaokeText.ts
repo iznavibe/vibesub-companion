@@ -1123,6 +1123,72 @@ export function patchSelection(
   );
 }
 
+/**
+ * Fuse the selected words into one block per line.
+ *
+ * A romanized row holds a unit per Korean syllable, which is right for singing
+ * along and wrong for a name: 정세비 arrives as "jeong se bi" when it wants to
+ * be one word. Selecting the pieces and joining them makes a single block that
+ * runs from the first's start to the last's end, so the sweep crosses the whole
+ * name at the pace it was sung.
+ *
+ * A gappy selection takes the words in between with it — the result has to be
+ * one block, and leaving a hole in the middle of it is not a thing that exists.
+ * The first word's colours and marks are what the joined block keeps.
+ */
+export function joinSelection(tracks: TrackLines, refs: SyllableRef[]): TrackLines {
+  if (refs.length < 2) return tracks;
+  const grouped = groupRefs(refs);
+
+  return tracks.map((lines, track) =>
+    lines.map((line, lineIndex) => {
+      const entry = grouped.get(`${track}:${lineIndex}`);
+      if (!entry || entry.set.size < 2) return line;
+
+      const indices = [...entry.set].sort((a, b) => a - b);
+      const first = indices[0];
+      const last = indices[indices.length - 1];
+      if (first < 0 || last >= line.syllables.length) return line;
+
+      const run = line.syllables.slice(first, last + 1);
+      const joined: KaraokeSyllable = {
+        ...run[0],
+        text: run.map((sy) => sy.text).join(''),
+        start: Math.min(...run.map((sy) => sy.start)),
+        end: Math.max(...run.map((sy) => sy.end)),
+      };
+
+      return {
+        ...line,
+        syllables: [...line.syllables.slice(0, first), joined, ...line.syllables.slice(last + 1)],
+      };
+    })
+  );
+}
+
+/**
+ * Where the selection ends up after a join: one word per line it touched.
+ *
+ * Indices shift when the words before them are fused, so this is worked out
+ * against the lines as they were.
+ */
+export function selectionAfterJoin(refs: SyllableRef[]): SyllableRef[] {
+  if (refs.length < 2) return refs;
+  const grouped = groupRefs(refs);
+  const out: SyllableRef[] = [];
+
+  // Earlier lines on the same track do not move, so only this line's own
+  // earlier joins shift it — which is to say, nothing does.
+  for (const { track, line, set } of grouped.values()) {
+    if (set.size < 2) {
+      for (const syllable of set) out.push({ track, line, syllable });
+      continue;
+    }
+    out.push({ track, line, syllable: Math.min(...set) });
+  }
+  return out;
+}
+
 /** Every selected word, in the order they are sung. */
 export function selectedSyllables(
   tracks: TrackLines,

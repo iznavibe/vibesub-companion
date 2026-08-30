@@ -31,6 +31,8 @@ interface KaraokeStylePanelProps {
   onStyleChange: (patch: Partial<KaraokeStyle>) => void;
   onProjectChange: (patch: Partial<LyricProject>) => void;
   onLineChange: (index: number, patch: Partial<KaraokeLine>) => void;
+  /** Fuse the selected words into one block. */
+  onJoinWords: () => void;
   /** Set the selected words to the project's own look. */
   onFanchantWords: () => void;
   /** Set a text box to the project's own look. */
@@ -118,6 +120,7 @@ export function KaraokeStylePanel({
   onStyleChange,
   onProjectChange,
   onLineChange,
+  onJoinWords,
   onFanchantWords,
   onFanchantNote,
   onWordsPatch,
@@ -912,6 +915,24 @@ export function KaraokeStylePanel({
               leaves — for the last line of a song, or any word that should go
               out gently rather than being cut.
             </p>
+
+            {words.length > 1 && (
+              <>
+                <div className={styles.buttonRow}>
+                  <button
+                    className={styles.smallBtn}
+                    onClick={onJoinWords}
+                    title="Fuse them into one block — Ctrl+J"
+                  >
+                    Join into one word
+                  </button>
+                </div>
+                <p className={styles.muted}>
+                  For a name the romaji cut into syllables: the joined block runs
+                  from the first word's start to the last one's end.
+                </p>
+              </>
+            )}
 
             {wordSpan && (
               <>

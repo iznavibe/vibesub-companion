@@ -31,8 +31,10 @@ import {
   splitLineAt,
   distributeEvenly,
   lineText,
+  joinSelection,
   mergeSyllable,
   moveSelection,
+  selectionAfterJoin,
   parseLyricBlockDetailed,
   normalizeTrackWindows,
   shiftLine,
@@ -445,6 +447,7 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
   // live values rather than the ones captured when it was attached.
   const selectionRef = useRef<SyllableRef[]>([]);
   const selectedNoteRef = useRef<string | null>(null);
+  const joinRef = useRef<() => void>(() => undefined);
   const deleteNoteRef = useRef<(id: string) => void>(() => undefined);
   useEffect(() => {
     selectionRef.current = selection;
@@ -482,6 +485,11 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
       if (mod && e.key.toLowerCase() === 'y') {
         e.preventDefault();
         doc.redo();
+        return;
+      }
+      if (mod && e.key.toLowerCase() === 'j') {
+        e.preventDefault();
+        joinRef.current();
         return;
       }
       if (tapping.isTapping) return;
@@ -1269,6 +1277,21 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
     [current, selection, setTracks]
   );
 
+  /**
+   * Fuse the selected words into one, so a name sweeps as a name.
+   *
+   * A romanized row is cut per Korean syllable, which is right for singing and
+   * wrong for 정세비 — three blocks that want to be "jeongsebi".
+   */
+  const handleJoinWords = useCallback(() => {
+    if (selection.length < 2) return;
+    const next = joinSelection([current.lines, current.romaji?.lines ?? []], selection);
+    setTracks(next);
+    setSelection(selectionAfterJoin(selection));
+  }, [current, selection, setTracks]);
+
+  joinRef.current = handleJoinWords;
+
   /** Stretch the selection into a new span, keeping the rhythm inside it. */
   const handleWordsRetime = useCallback(
     (start: number, end: number) => {
@@ -1942,6 +1965,14 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
             </button>
             <button
               className={styles.toolBtn}
+              onClick={handleJoinWords}
+              disabled={selection.length < 2}
+              title="Fuse the selected words into one block — Ctrl+J"
+            >
+              Join words
+            </button>
+            <button
+              className={styles.toolBtn}
               onClick={() =>
                 selectedSyllable !== null &&
                 withSelectedLine((l) => mergeSyllable(l, selectedSyllable))
@@ -2349,6 +2380,7 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
               selectedNoteId={selectedNoteId}
               words={selectedWords}
               wordSpan={selectedWordSpan}
+              onJoinWords={handleJoinWords}
               onFanchantWords={handleFanchantWords}
               onFanchantNote={handleFanchantNote}
               onWordsPatch={handleWordsPatch}
