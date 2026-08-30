@@ -38,3 +38,30 @@ build-tauri.bat
 
 # Source icon folder (generated icons are in src-tauri/icons/)
 icon/
+
+# Working media — source videos, renders and test assets live alongside the
+# project but must never enter the repo (these run to gigabytes).
+VODS/
+SRT-EN/
+SRT-KR/
+*.mp4
+*.mkv
+*.mov
+*.webm
+*.wav
+*.mp3
+*.m4a
+Lyrics.mp4_*.jpg
+test-artwork.png
+
+# Licensed font files supplied by the user; loaded at runtime, not redistributed.
+*.otf
+*.ttf
+*.ttc
+
+# Local dev/util scripts and scratch output
+contexts.json
+debug_batch1.txt
+translate.bat
+translate_srt.py
+desktop.ini

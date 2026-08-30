@@ -6,19 +6,28 @@ export interface WaveformData {
   duration: number;
 }
 
+export interface WaveformHookResult {
+  data: WaveformData | null;
+  isLoading: boolean;
+}
+
 export function useWaveformData(
   videoFile: File | null,
   videoPath?: string
-): WaveformData | null {
-  const [waveformData, setWaveformData] = useState<WaveformData | null>(null);
+): WaveformHookResult {
+  const [data, setData] = useState<WaveformData | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
     if (!videoFile) {
-      setWaveformData(null);
+      setData(null);
+      setIsLoading(false);
       return;
     }
 
     let cancelled = false;
+    setIsLoading(true);
+    setData(null);
 
     async function extractWaveform() {
       try {
@@ -31,7 +40,7 @@ export function useWaveformData(
           );
 
           if (!cancelled && result.peaks.length > 0) {
-            setWaveformData({
+            setData({
               peaks: new Float32Array(result.peaks),
               duration: result.duration,
             });
@@ -96,10 +105,12 @@ export function useWaveformData(
         audioCtx.close();
 
         if (!cancelled) {
-          setWaveformData({ peaks, duration: audioDuration });
+          setData({ peaks, duration: audioDuration });
         }
       } catch (err) {
         console.error('Waveform extraction failed:', err);
+      } finally {
+        if (!cancelled) setIsLoading(false);
       }
     }
 
@@ -107,8 +118,9 @@ export function useWaveformData(
 
     return () => {
       cancelled = true;
+      setIsLoading(false);
     };
   }, [videoFile, videoPath]);
 
-  return waveformData;
+  return { data, isLoading };
 }

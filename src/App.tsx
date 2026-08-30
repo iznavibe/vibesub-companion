@@ -7,6 +7,14 @@ import { SubtitleTimeline } from './components/SubtitleTimeline';
 import { ModelSelector } from './components/ModelSelector';
 import { DisplayModeSelector } from './components/DisplayModeSelector';
 import { RecentProjects } from './components/RecentProjects';
+import { TextSplitDialog } from './components/TextSplitDialog';
+import { KaraokeStudio } from './components/KaraokeStudio';
+import { LyricProject } from './types/karaoke';
+import {
+  createLyricProject,
+  loadLyricProject,
+  saveLyricProject,
+} from './services/lyricProjectService';
 import { Subtitle, SubtitleDisplayMode } from './types/subtitle';
 import { ProviderConfig } from './types/provider';
 import { Project } from './types/project';
@@ -46,6 +54,7 @@ function App() {
   const [showProviderConfig, setShowProviderConfig] = useState(false);
   const [showSyncMenu, setShowSyncMenu] = useState(false);
   const [selectedSubtitleId, setSelectedSubtitleId] = useState<number | null>(null);
+  const [pendingSplit, setPendingSplit] = useState<{ subtitle: Subtitle; splitTime: number } | null>(null);
   const [timelineDisplayMode, setTimelineDisplayMode] = useState<SubtitleDisplayMode>('original');
 
   // Undo/redo history for subtitles
@@ -95,6 +104,8 @@ function App() {
     const handleKeyDown = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement).tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      // The karaoke studio owns history while it is open.
+      if (lyricProjectRef.current) return;
 
       if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
         e.preventDefault();
@@ -116,6 +127,9 @@ function App() {
   const [currentProject, setCurrentProject] = useState<Project | null>(null);
   const [showRecentProjects, setShowRecentProjects] = useState(true);
   const [showNewProjectDropZone, setShowNewProjectDropZone] = useState(false);
+
+  // Karaoke / lyric-video studio. Non-null means the studio owns the screen.
+  const [lyricProject, setLyricProject] = useState<LyricProject | null>(null);
   const lastSavedRef = useRef<string>('');
 
   // Close menus when clicking outside
@@ -184,6 +198,30 @@ function App() {
 
     return () => clearInterval(interval);
   }, [currentProject]);
+
+  // Auto-save the open lyric project on the same cadence as subtitle projects.
+  const lyricProjectRef = useRef<LyricProject | null>(null);
+  const lastSavedLyricRef = useRef<string>('');
+  useEffect(() => {
+    lyricProjectRef.current = lyricProject;
+  }, [lyricProject]);
+
+  useEffect(() => {
+    if (!lyricProject || !isTauri()) return;
+    const interval = setInterval(async () => {
+      const project = lyricProjectRef.current;
+      if (!project) return;
+      const snapshot = JSON.stringify({ ...project, lastModifiedAt: '' });
+      if (snapshot === lastSavedLyricRef.current) return;
+      try {
+        await saveLyricProject(project);
+        lastSavedLyricRef.current = snapshot;
+      } catch (err) {
+        console.error('Lyric auto-save failed:', err);
+      }
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [lyricProject?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleVideoLoaded = useCallback((file: File, path?: string) => {
     setVideoFile(file);
@@ -298,25 +336,36 @@ function App() {
   }, [pushUndo]);
 
   // Waveform data extraction
-  const waveformData = useWaveformData(videoFile, videoPath);
+  const { data: waveformData, isLoading: isWaveformLoading } = useWaveformData(videoFile, videoPath);
 
   const handleSubtitleSelect = useCallback((id: number | null) => {
     setSelectedSubtitleId(id);
   }, []);
 
+  // Opens the text-split dialog instead of splitting immediately
   const handleSubtitleSplit = useCallback((id: number, splitTime: number) => {
+    const sub = subtitles.find(s => s.id === id);
+    if (!sub) return;
+    if (splitTime <= sub.startSeconds || splitTime >= sub.endSeconds) return;
+    setPendingSplit({ subtitle: sub, splitTime });
+    setSelectedSubtitleId(null);
+  }, [subtitles]);
+
+  // Called when the user confirms text split in the dialog
+  const handleConfirmSplit = useCallback((firstText: string, secondText: string) => {
+    if (!pendingSplit) return;
+    const { subtitle: sub, splitTime } = pendingSplit;
     pushUndo();
     setSubtitles((prev) => {
-      const index = prev.findIndex((s) => s.id === id);
+      const index = prev.findIndex((s) => s.id === sub.id);
       if (index === -1) return prev;
-
-      const sub = prev[index];
-      if (splitTime <= sub.startSeconds || splitTime >= sub.endSeconds) return prev;
 
       const firstHalf: Subtitle = {
         ...sub,
         endSeconds: splitTime,
         endTime: secondsToTimestamp(splitTime),
+        originalText: firstText,
+        translatedText: '',
       };
 
       const secondHalf: Subtitle = {
@@ -324,13 +373,15 @@ function App() {
         id: 0,
         startSeconds: splitTime,
         startTime: secondsToTimestamp(splitTime),
+        originalText: secondText,
+        translatedText: '',
       };
 
       const newList = [...prev.slice(0, index), firstHalf, secondHalf, ...prev.slice(index + 1)];
       return newList.map((s, i) => ({ ...s, id: i + 1 }));
     });
-    setSelectedSubtitleId(null);
-  }, [pushUndo]);
+    setPendingSplit(null);
+  }, [pendingSplit, pushUndo]);
 
   const handleSeek = useCallback((time: number) => {
     videoPlayerRef.current?.seek(time);
@@ -343,7 +394,9 @@ function App() {
   const handleSubtitleAddFromList = useCallback((afterId: number | null) => {
     const afterSub = afterId ? subtitles.find((s) => s.id === afterId) : null;
     const startTime = afterSub ? afterSub.endSeconds : currentTime;
-    const endTime = Math.min(startTime + 2, duration || startTime + 2);
+    // Cap end at the next subtitle's start so new entries never overlap
+    const nextSub = subtitles.find((s) => s.startSeconds >= startTime && s.id !== afterId);
+    const endTime = Math.min(startTime + 2, nextSub ? nextSub.startSeconds : (duration || startTime + 2));
     handleSubtitleAdd(afterId, startTime, endTime);
   }, [subtitles, currentTime, duration, handleSubtitleAdd]);
 
@@ -364,6 +417,27 @@ function App() {
 
     return true;
   };
+
+  // Close gaps smaller than threshold between adjacent subtitles
+  const handleTrimGaps = useCallback(() => {
+    const THRESHOLD = 0.5; // seconds — gaps smaller than this get closed
+    pushUndo();
+    setSubtitles(prev =>
+      prev.map((sub, i) => {
+        if (i >= prev.length - 1) return sub;
+        const next = prev[i + 1];
+        const gap = next.startSeconds - sub.endSeconds;
+        if (gap > 0 && gap < THRESHOLD) {
+          return {
+            ...sub,
+            endSeconds: next.startSeconds,
+            endTime: secondsToTimestamp(next.startSeconds),
+          };
+        }
+        return sub;
+      })
+    );
+  }, [pushUndo]);
 
   const handleTranslateAll = async () => {
     if (!validateConfig()) return;
@@ -506,8 +580,50 @@ function App() {
     setShowNewProjectDropZone(true);
   };
 
+  const handleNewLyricProject = () => {
+    setLyricProject(createLyricProject());
+    setShowRecentProjects(false);
+  };
+
+  const handleLyricProjectSelect = async (projectId: string) => {
+    try {
+      setLyricProject(await loadLyricProject(projectId));
+      setShowRecentProjects(false);
+    } catch (err) {
+      console.error('Failed to load lyric project:', err);
+      setError('Failed to load lyric video project');
+    }
+  };
+
+  const handleLyricBack = async () => {
+    if (lyricProject) {
+      try {
+        await saveLyricProject(lyricProject);
+      } catch (err) {
+        console.error('Failed to save lyric project:', err);
+      }
+    }
+    setLyricProject(null);
+    setShowRecentProjects(true);
+  };
+
   // Initial state: show two drop zones side by side
   const showInitialDropZones = !videoFile || subtitles.length === 0;
+
+  // Karaoke studio takes over the whole window while a lyric project is open.
+  if (lyricProject) {
+    return (
+      <div className={`${styles.app} ${styles.appStudio}`}>
+        <main className={`${styles.main} ${styles.mainStudio}`}>
+          <KaraokeStudio
+            project={lyricProject}
+            onProjectChange={setLyricProject}
+            onBack={handleLyricBack}
+          />
+        </main>
+      </div>
+    );
+  }
 
   // Show recent projects screen in Tauri environment
   if (showRecentProjects && isTauri()) {
@@ -520,6 +636,8 @@ function App() {
           <RecentProjects
             onProjectSelect={handleProjectSelect}
             onNewProject={handleNewProject}
+            onLyricProjectSelect={handleLyricProjectSelect}
+            onNewLyricProject={handleNewLyricProject}
           />
         </main>
       </div>
@@ -627,6 +745,7 @@ function App() {
                   onSubtitleSelect={handleSubtitleSelect}
                   onSubtitleSplit={handleSubtitleSplit}
                   waveformData={waveformData}
+                  isWaveformLoading={isWaveformLoading}
                   timelineDisplayMode={timelineDisplayMode}
                   onTimelineDisplayModeChange={setTimelineDisplayMode}
                 />
@@ -651,6 +770,14 @@ function App() {
                     className={styles.importBtn}
                   >
                     Import
+                  </button>
+                  <button
+                    onClick={handleTrimGaps}
+                    disabled={subtitles.length === 0}
+                    className={styles.trimBtn}
+                    title="Extend each subtitle's end time to meet the next one when the gap is under 500ms"
+                  >
+                    Trim Gaps
                   </button>
                   <div ref={exportWrapperRef} className={styles.exportWrapper}>
                     <button
@@ -722,6 +849,15 @@ function App() {
           </div>
         )}
       </main>
+
+      {pendingSplit && (
+        <TextSplitDialog
+          subtitle={pendingSplit.subtitle}
+          splitTime={pendingSplit.splitTime}
+          onConfirm={handleConfirmSplit}
+          onCancel={() => setPendingSplit(null)}
+        />
+      )}
     </div>
   );
 }

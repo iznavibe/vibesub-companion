@@ -1,9 +1,10 @@
 use symphonia::core::audio::SampleBuffer;
 use symphonia::core::codecs::DecoderOptions;
-use symphonia::core::formats::FormatOptions;
+use symphonia::core::formats::{FormatOptions, SeekMode, SeekTo};
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
+use symphonia::core::units::Time;
 use std::fs::File;
 
 #[derive(serde::Serialize)]
@@ -51,22 +52,113 @@ fn extract_waveform_sync(path: &str, peaks_per_second: f64) -> Result<WaveformRe
         .codec_params
         .sample_rate
         .ok_or("Unknown sample rate")? as f64;
-    let channels = track
-        .codec_params
-        .channels
-        .map(|c| c.count())
-        .unwrap_or(1) as f64;
+
+    // n_frames gives us the total frame count — use it for duration and to enable
+    // the fast seeking path (avoids reading the whole file sequentially).
+    let n_frames = track.codec_params.n_frames.unwrap_or(0);
 
     let mut decoder = symphonia::default::get_codecs()
         .make(&track.codec_params, &DecoderOptions::default())
         .map_err(|e| format!("Codec not supported: {e}"))?;
 
+    // --- Fast path: seek to evenly-spaced positions ---
+    // When n_frames is known we can jump through the file instead of reading
+    // every packet.  This is orders of magnitude faster for large files.
+    if n_frames > 0 {
+        let duration = n_frames as f64 / sample_rate;
+        // Cap total peaks so we never do more work than needed.
+        let n_peaks = ((duration * peaks_per_second) as usize)
+            .min(18_000)
+            .max(10);
+        let step = duration / n_peaks as f64;
+
+        let mut peaks = vec![0.0f32; n_peaks];
+
+        for i in 0..n_peaks {
+            let seek_secs = i as f64 * step;
+
+            if format
+                .seek(
+                    SeekMode::Coarse,
+                    SeekTo::Time {
+                        time: Time {
+                            seconds: seek_secs as u64,
+                            frac: seek_secs.fract(),
+                        },
+                        track_id: Some(track_id),
+                    },
+                )
+                .is_err()
+            {
+                break;
+            }
+
+            // Read packets until we find an audio one for this slot.
+            let rms = 'slot: loop {
+                let packet = match format.next_packet() {
+                    Ok(p) => p,
+                    Err(_) => break 'slot 0.0f32,
+                };
+                if packet.track_id() != track_id {
+                    continue;
+                }
+                let decoded = match decoder.decode(&packet) {
+                    Ok(d) => d,
+                    Err(_) => continue,
+                };
+
+                let spec = *decoded.spec();
+                let ch = spec.channels.count();
+                let n_f = decoded.capacity();
+                let mut sample_buf = SampleBuffer::<f32>::new(n_f as u64, spec);
+                sample_buf.copy_interleaved_ref(decoded);
+                let samples = sample_buf.samples();
+
+                let mut sum_sq = 0.0f64;
+                let mut count = 0usize;
+                let mut j = 0;
+                while j < samples.len() {
+                    let mut frame_sum = 0.0f32;
+                    for c in 0..ch {
+                        if j + c < samples.len() {
+                            frame_sum += samples[j + c];
+                        }
+                    }
+                    let mono = frame_sum / ch as f32;
+                    sum_sq += (mono as f64) * (mono as f64);
+                    count += 1;
+                    j += ch;
+                }
+
+                break 'slot if count > 0 {
+                    (sum_sq / count as f64).sqrt() as f32
+                } else {
+                    0.0f32
+                };
+            };
+
+            peaks[i] = rms;
+        }
+
+        // Normalize
+        let max_peak = peaks.iter().cloned().fold(0.0f32, f32::max);
+        if max_peak > 0.0 {
+            for p in &mut peaks {
+                *p /= max_peak;
+            }
+        }
+
+        return Ok(WaveformResult { peaks, duration });
+    }
+
+    // --- Slow path: sequential decode (fallback when n_frames is unknown) ---
     let samples_per_peak = (sample_rate / peaks_per_second).max(1.0) as usize;
 
     let mut peaks: Vec<f32> = Vec::new();
     let mut sum_sq: f64 = 0.0;
     let mut count: usize = 0;
-    let mut total_samples: u64 = 0;
+    // total_frames counts mono frames (one per sample-pair across channels).
+    let mut total_frames: u64 = 0;
 
     loop {
         let packet = match format.next_packet() {
@@ -96,10 +188,9 @@ fn extract_waveform_sync(path: &str, peaks_per_second: f64) -> Result<WaveformRe
         sample_buf.copy_interleaved_ref(decoded);
         let samples = sample_buf.samples();
 
-        // Process samples, mixing channels by averaging
+        // Mix channels down to mono and accumulate RMS per peak window.
         let mut i = 0;
         while i < samples.len() {
-            // Average across channels for this frame
             let mut frame_sum: f32 = 0.0;
             for c in 0..ch {
                 if i + c < samples.len() {
@@ -110,7 +201,7 @@ fn extract_waveform_sync(path: &str, peaks_per_second: f64) -> Result<WaveformRe
 
             sum_sq += (mono as f64) * (mono as f64);
             count += 1;
-            total_samples += 1;
+            total_frames += 1;
 
             if count >= samples_per_peak {
                 let rms = (sum_sq / count as f64).sqrt() as f32;
@@ -137,7 +228,9 @@ fn extract_waveform_sync(path: &str, peaks_per_second: f64) -> Result<WaveformRe
         }
     }
 
-    let duration = total_samples as f64 / sample_rate / channels;
+    // Fixed: total_frames already counts frames (not raw interleaved samples),
+    // so we only divide by sample_rate — NOT by channels.
+    let duration = total_frames as f64 / sample_rate;
 
     Ok(WaveformResult { peaks, duration })
 }

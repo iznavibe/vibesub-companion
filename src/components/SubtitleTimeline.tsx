@@ -15,6 +15,7 @@ interface SubtitleTimelineProps {
   onSubtitleSelect: (id: number | null) => void;
   onSubtitleSplit: (id: number, splitTime: number) => void;
   waveformData: WaveformData | null;
+  isWaveformLoading?: boolean;
   timelineDisplayMode: SubtitleDisplayMode;
   onTimelineDisplayModeChange: (mode: SubtitleDisplayMode) => void;
 }
@@ -44,6 +45,9 @@ interface TimelineDragState {
 }
 
 const SNAP_THRESHOLD_PX = 5;
+// Larger snap zone for the immediately-adjacent subtitle edge — makes it easy
+// to drag end handles flush against the next/previous subtitle with zero gap.
+const ADJACENT_SNAP_THRESHOLD_PX = 20;
 const DRAG_THRESHOLD_PX = 3;
 
 export const SubtitleTimeline = memo(function SubtitleTimeline({
@@ -58,6 +62,7 @@ export const SubtitleTimeline = memo(function SubtitleTimeline({
   onSubtitleSelect,
   onSubtitleSplit,
   waveformData,
+  isWaveformLoading = false,
   timelineDisplayMode,
   onTimelineDisplayModeChange,
 }: SubtitleTimelineProps) {
@@ -102,6 +107,8 @@ export const SubtitleTimeline = memo(function SubtitleTimeline({
   onSubtitleSelectRef.current = onSubtitleSelect;
   const onSubtitleSplitRef = useRef(onSubtitleSplit);
   onSubtitleSplitRef.current = onSubtitleSplit;
+  const onSubtitleAddRef = useRef(onSubtitleAdd);
+  onSubtitleAddRef.current = onSubtitleAdd;
   const selectedSubtitleIdRef = useRef(selectedSubtitleId);
   selectedSubtitleIdRef.current = selectedSubtitleId;
   const pixelsPerSecondRef = useRef(pixelsPerSecond);
@@ -303,16 +310,22 @@ export const SubtitleTimeline = memo(function SubtitleTimeline({
           newStart = Math.min(newStart, drag.originalEnd - 0.1);
           newStart = Math.max(0, newStart);
           if (prevSub) newStart = Math.max(newStart, prevSub.endSeconds);
-          // Snap
+          // Snap: prefer closing the gap to the previous subtitle with a generous threshold
           {
-            const snap = findSnapTarget(newStart, drag.subtitleId, pps);
-            if (snap !== null && snap < drag.originalEnd - 0.1 && snap >= 0) {
-              if (!prevSub || snap >= prevSub.endSeconds) {
-                newStart = snap;
-                showSnapLine(snap);
-              }
+            const adjacentThresh = ADJACENT_SNAP_THRESHOLD_PX / pps;
+            if (prevSub && Math.abs(newStart - prevSub.endSeconds) <= adjacentThresh) {
+              newStart = prevSub.endSeconds;
+              showSnapLine(newStart);
             } else {
-              hideSnapLine();
+              const snap = findSnapTarget(newStart, drag.subtitleId, pps);
+              if (snap !== null && snap < drag.originalEnd - 0.1 && snap >= 0) {
+                if (!prevSub || snap >= prevSub.endSeconds) {
+                  newStart = snap;
+                  showSnapLine(snap);
+                }
+              } else {
+                hideSnapLine();
+              }
             }
           }
           break;
@@ -321,16 +334,22 @@ export const SubtitleTimeline = memo(function SubtitleTimeline({
           newEnd = Math.max(newEnd, drag.originalStart + 0.1);
           newEnd = Math.min(dur, newEnd);
           if (nextSub) newEnd = Math.min(newEnd, nextSub.startSeconds);
-          // Snap
+          // Snap: prefer closing the gap to the next subtitle with a generous threshold
           {
-            const snap = findSnapTarget(newEnd, drag.subtitleId, pps);
-            if (snap !== null && snap > drag.originalStart + 0.1 && snap <= dur) {
-              if (!nextSub || snap <= nextSub.startSeconds) {
-                newEnd = snap;
-                showSnapLine(snap);
-              }
+            const adjacentThresh = ADJACENT_SNAP_THRESHOLD_PX / pps;
+            if (nextSub && Math.abs(newEnd - nextSub.startSeconds) <= adjacentThresh) {
+              newEnd = nextSub.startSeconds;
+              showSnapLine(newEnd);
             } else {
-              hideSnapLine();
+              const snap = findSnapTarget(newEnd, drag.subtitleId, pps);
+              if (snap !== null && snap > drag.originalStart + 0.1 && snap <= dur) {
+                if (!nextSub || snap <= nextSub.startSeconds) {
+                  newEnd = snap;
+                  showSnapLine(snap);
+                }
+              } else {
+                hideSnapLine();
+              }
             }
           }
           break;
@@ -591,6 +610,28 @@ export const SubtitleTimeline = memo(function SubtitleTimeline({
     setIsGrabbing(true);
   };
 
+  // Add a subtitle starting exactly at the playhead position.
+  // If the playhead is inside an existing subtitle, start right after that one ends.
+  const handleAddAtPlayhead = useCallback(() => {
+    const ct = currentTimeRef.current;
+    const dur = durationRef.current;
+    const subs = subtitlesRef.current;
+
+    // Check if playhead is inside an existing subtitle
+    const containing = subs.find(s => ct >= s.startSeconds && ct < s.endSeconds);
+    const startTime = containing ? containing.endSeconds : ct;
+
+    // Find the next subtitle after startTime to bound the end
+    const nextSub = subs.find(s => s.startSeconds >= startTime && s.id !== containing?.id);
+    const endTime = Math.min(startTime + 2, nextSub ? nextSub.startSeconds : dur, dur);
+
+    if (endTime <= startTime) return; // no room
+
+    // afterId = the subtitle immediately before startTime
+    const afterSub = [...subs].reverse().find(s => s.endSeconds <= startTime);
+    onSubtitleAddRef.current(afterSub?.id ?? null, startTime, endTime);
+  }, []);
+
   const handleAddSubtitle = (e: React.MouseEvent) => {
     e.stopPropagation();
     const rect = timelineRef.current?.getBoundingClientRect();
@@ -604,8 +645,10 @@ export const SubtitleTimeline = memo(function SubtitleTimeline({
       .reverse()
       .find(s => s.endSeconds <= clickTime);
 
+    const nextSub = subtitles.find(s => s.startSeconds > clickTime);
+
     const startTime = clickTime;
-    const endTime = Math.min(clickTime + 2, duration);
+    const endTime = Math.min(clickTime + 2, nextSub ? nextSub.startSeconds : duration, duration);
 
     onSubtitleAdd(afterSub?.id || null, startTime, endTime);
   };
@@ -666,6 +709,13 @@ export const SubtitleTimeline = memo(function SubtitleTimeline({
           title="Toggle bar text: Original / Translation / Both"
         >
           {getDisplayLabel()}
+        </button>
+        <button
+          className={styles.addAtPlayheadBtn}
+          onClick={handleAddAtPlayhead}
+          title="Add subtitle at playhead position"
+        >
+          + Add here
         </button>
         <span className={styles.hint}>Click bar to select • C to split • Del to remove • Scroll to pan</span>
       </div>
@@ -745,7 +795,9 @@ export const SubtitleTimeline = memo(function SubtitleTimeline({
       </div>
 
       {/* Waveform row — below the timeline, scroll-synced */}
-      {waveformData && (
+      {isWaveformLoading ? (
+        <div className={styles.waveformLoading}>Extracting waveform…</div>
+      ) : waveformData ? (
         <div
           ref={waveformWrapperRef}
           className={styles.waveformWrapper}
@@ -755,7 +807,7 @@ export const SubtitleTimeline = memo(function SubtitleTimeline({
             className={styles.waveformCanvas}
           />
         </div>
-      )}
+      ) : null}
     </div>
   );
 });

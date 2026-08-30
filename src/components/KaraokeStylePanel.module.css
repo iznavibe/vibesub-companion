@@ -1,0 +1,237 @@
+/* The only scrolling region on the right, and vertical only — sideways scroll
+   would just hide controls. */
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 6px;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #262626;
+}
+
+.section:last-child {
+  border-bottom: none;
+}
+
+.heading {
+  margin: 0;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #9a9a9a;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.badge {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 11px;
+  background: rgba(255, 180, 90, 0.18);
+  border: 1px solid rgba(255, 180, 90, 0.5);
+  color: #ffce8f;
+  border-radius: 3px;
+  padding: 1px 6px;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.fieldLabel {
+  font-size: 10px;
+  color: #7d7d7d;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.input {
+  width: 100%;
+  box-sizing: border-box;
+  background: #1c1c1c;
+  border: 1px solid #333;
+  border-radius: 4px;
+  color: #e6e6e6;
+  font-size: 12px;
+  padding: 5px 7px;
+  min-width: 0;
+}
+
+.input:focus {
+  outline: none;
+  border-color: #5aaaff;
+}
+
+.colorRow {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+
+.colorSwatch {
+  width: 28px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid #333;
+  border-radius: 4px;
+  background: #1c1c1c;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.colorText {
+  flex: 1;
+  min-width: 0;
+  background: #1c1c1c;
+  border: 1px solid #333;
+  border-radius: 4px;
+  color: #e6e6e6;
+  font-size: 11px;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  padding: 5px 6px;
+}
+
+.toggles {
+  display: flex;
+  gap: 14px;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: #ccc;
+  cursor: pointer;
+}
+
+.buttonRow {
+  display: flex;
+  gap: 6px;
+}
+
+.smallBtn {
+  flex: 1;
+  min-width: 0;
+  background: #242424;
+  border: 1px solid #383838;
+  color: #ddd;
+  border-radius: 4px;
+  padding: 5px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.smallBtn:hover {
+  background: #2e2e2e;
+}
+
+.muted {
+  margin: 0;
+  font-size: 11px;
+  color: #777;
+  line-height: 1.5;
+}
+
+.smallBtnActive {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: #2f6fd0;
+  border: 1px solid #3d82ea;
+  color: #fff;
+  border-radius: 4px;
+  padding: 5px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.noteList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.noteItem,
+.noteItemActive {
+  padding: 5px 7px;
+  font-size: 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  color: #c4c4c4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.noteItem:hover {
+  background: #232323;
+}
+
+.noteItemActive {
+  background: rgba(255, 180, 90, 0.18);
+  color: #ffce8f;
+}
+
+.spacingPresets {
+  display: flex;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+}
+
+.alignRow {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: #1c1c1c;
+  border: 1px solid #2c2c2c;
+}
+
+.alignOk {
+  font-size: 11px;
+  color: #7ee2a8;
+}
+
+.alignOff {
+  font-size: 11px;
+  color: #8a8a8a;
+}

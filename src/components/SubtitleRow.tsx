@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, memo } from 'react';
+import { useEffect, useRef, useState, memo, useCallback } from 'react';
 import { Subtitle } from '../types/subtitle';
 import styles from './SubtitleRow.module.css';
 
@@ -16,6 +16,12 @@ interface SubtitleRowProps {
   registerTextarea?: (id: number, el: HTMLTextAreaElement | null) => void;
 }
 
+function autoResize(el: HTMLTextAreaElement | null) {
+  if (!el) return;
+  el.style.height = 'auto';
+  el.style.height = `${el.scrollHeight}px`;
+}
+
 export const SubtitleRow = memo(function SubtitleRow({
   subtitle,
   index,
@@ -29,8 +35,8 @@ export const SubtitleRow = memo(function SubtitleRow({
   onAdd,
   registerTextarea,
 }: SubtitleRowProps) {
+  const originalRef = useRef<HTMLTextAreaElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  // Local state for smooth typing - only syncs on blur
   const [localOriginal, setLocalOriginal] = useState(subtitle.originalText);
   const [localTranslation, setLocalTranslation] = useState(subtitle.translatedText);
   const [isOriginalFocused, setIsOriginalFocused] = useState(false);
@@ -54,6 +60,10 @@ export const SubtitleRow = memo(function SubtitleRow({
     }
   }, [subtitle.translatedText, isTranslationFocused]);
 
+  // Auto-resize both textareas whenever their content changes
+  useEffect(() => { autoResize(originalRef.current); }, [localOriginal]);
+  useEffect(() => { autoResize(textareaRef.current); }, [localTranslation]);
+
   useEffect(() => {
     registerTextarea?.(subtitle.id, textareaRef.current);
     return () => registerTextarea?.(subtitle.id, null);
@@ -70,6 +80,16 @@ export const SubtitleRow = memo(function SubtitleRow({
     if (target.tagName === 'TEXTAREA' || target.tagName === 'BUTTON') return;
     onRowClick(subtitle.id, index);
   };
+
+  const handleOriginalChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setLocalOriginal(e.target.value);
+    autoResize(e.target);
+  }, []);
+
+  const handleTranslationChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setLocalTranslation(e.target.value);
+    autoResize(e.target);
+  }, []);
 
   const handleOriginalBlur = () => {
     setIsOriginalFocused(false);
@@ -123,13 +143,13 @@ export const SubtitleRow = memo(function SubtitleRow({
       </div>
       <div className={styles.textCell}>
         <textarea
+          ref={originalRef}
           className={styles.originalInput}
           value={localOriginal}
-          onChange={(e) => setLocalOriginal(e.target.value)}
+          onChange={handleOriginalChange}
           onFocus={() => setIsOriginalFocused(true)}
           onBlur={handleOriginalBlur}
           placeholder="Original text..."
-          rows={Math.max(2, localOriginal.split('\n').length)}
         />
       </div>
       <div className={styles.textCell}>
@@ -137,11 +157,10 @@ export const SubtitleRow = memo(function SubtitleRow({
           ref={textareaRef}
           className={`${styles.translationInput} ${focusTranslation ? styles.focused : ''}`}
           value={localTranslation}
-          onChange={(e) => setLocalTranslation(e.target.value)}
+          onChange={handleTranslationChange}
           onFocus={() => setIsTranslationFocused(true)}
           onBlur={handleTranslationBlur}
           placeholder="Translation will appear here..."
-          rows={Math.max(2, localOriginal.split('\n').length)}
         />
       </div>
     </div>

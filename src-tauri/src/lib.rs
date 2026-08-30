@@ -24,6 +24,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::file::get_app_data_dir,
             commands::waveform::extract_waveform,
+            commands::render::check_ffmpeg,
+            commands::render::render_lyric_video,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

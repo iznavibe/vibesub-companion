@@ -113,6 +113,7 @@
 
 .translateBtn,
 .importBtn,
+.trimBtn,
 .exportBtn,
 .resetBtn {
   padding: 7px 14px;
@@ -208,6 +209,20 @@
 }
 
 .importBtn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.trimBtn {
+  background-color: #0f766e;
+  color: white;
+}
+
+.trimBtn:hover:not(:disabled) {
+  background-color: #0d9488;
+}
+
+.trimBtn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }
@@ -326,4 +341,23 @@
     grid-template-columns: 1fr;
     height: auto;
   }
+}
+
+/* The karaoke studio owns the whole window: it manages its own scrolling
+   regions, so the shell must not grow and take the page with it. */
+.appStudio {
+  height: 100vh;
+  overflow: hidden;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.mainStudio {
+  flex: 1;
+  min-height: 0;
+  max-width: none;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
 }

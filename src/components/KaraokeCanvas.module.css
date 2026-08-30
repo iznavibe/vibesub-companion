@@ -1,0 +1,131 @@
+.wrapper {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  overflow: hidden;
+}
+
+.stage {
+  position: relative;
+  flex-shrink: 0;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #111;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
+}
+
+.canvas {
+  display: block;
+  touch-action: none;
+  cursor: move;
+}
+
+.transformBox {
+  position: absolute;
+  border: 1px dashed rgba(120, 190, 255, 0.85);
+  border-radius: 2px;
+  pointer-events: none;
+  box-sizing: border-box;
+}
+
+.handle {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  background: #fff;
+  border: 1px solid #2f6fd0;
+  border-radius: 2px;
+  pointer-events: auto;
+  touch-action: none;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+
+.handle:hover {
+  background: #cfe6ff;
+}
+
+.selectedLine {
+  position: absolute;
+  background: rgba(90, 170, 255, 0.14);
+  border-left: 3px solid rgba(90, 170, 255, 0.9);
+  pointer-events: none;
+}
+
+.noteMarker {
+  position: absolute;
+  border: 2px solid #ffb45a;
+  border-radius: 50%;
+  background: rgba(255, 180, 90, 0.3);
+  pointer-events: none;
+}
+
+.hint {
+  margin: 0;
+  font-size: 11px;
+  color: #8a8a8a;
+  line-height: 1.5;
+}
+
+.guideV,
+.guideH {
+  position: absolute;
+  background: #ff3ea5;
+  pointer-events: none;
+  z-index: 4;
+  box-shadow: 0 0 4px rgba(255, 62, 165, 0.8);
+}
+
+.guideV {
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  margin-left: -0.5px;
+}
+
+.guideH {
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 1px;
+  margin-top: -0.5px;
+}
+
+.grid {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* Paired light line and dark shadow, so the grid reads over both bright artwork
+   and dark footage without a translucent wash over the whole frame. */
+.gridLineV,
+.gridLineH {
+  position: absolute;
+  background: rgba(255, 255, 255, 0.75);
+}
+
+.gridLineV {
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  box-shadow: 1px 0 0 rgba(0, 0, 0, 0.55), -1px 0 0 rgba(0, 0, 0, 0.55);
+}
+
+.gridLineH {
+  left: 0;
+  right: 0;
+  height: 1px;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.55), 0 -1px 0 rgba(0, 0, 0, 0.55);
+}
+
+/* The middle line of an odd grid is the one people align to most. */
+.gridLineMajor {
+  background: rgba(255, 214, 92, 0.95);
+}

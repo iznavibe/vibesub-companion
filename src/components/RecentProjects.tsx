@@ -1,11 +1,18 @@
 import { useState, useEffect } from 'react';
 import { ProjectSummary } from '../types/project';
 import { listProjects, deleteProject } from '../services/projectService';
+import {
+  LyricProjectSummary,
+  deleteLyricProject,
+  listLyricProjects,
+} from '../services/lyricProjectService';
 import styles from './RecentProjects.module.css';
 
 interface RecentProjectsProps {
   onProjectSelect: (projectId: string) => void;
   onNewProject: () => void;
+  onLyricProjectSelect: (projectId: string) => void;
+  onNewLyricProject: () => void;
 }
 
 function formatDate(isoString: string): string {
@@ -25,8 +32,14 @@ function formatDate(isoString: string): string {
   }
 }
 
-export function RecentProjects({ onProjectSelect, onNewProject }: RecentProjectsProps) {
+export function RecentProjects({
+  onProjectSelect,
+  onNewProject,
+  onLyricProjectSelect,
+  onNewLyricProject,
+}: RecentProjectsProps) {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [lyricProjects, setLyricProjects] = useState<LyricProjectSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
@@ -37,12 +50,33 @@ export function RecentProjects({ onProjectSelect, onNewProject }: RecentProjects
   const loadProjects = async () => {
     setLoading(true);
     try {
-      const projectList = await listProjects();
+      const [projectList, lyricList] = await Promise.all([
+        listProjects(),
+        listLyricProjects(),
+      ]);
       setProjects(projectList);
+      setLyricProjects(lyricList);
     } catch (err) {
       console.error('Failed to load projects:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDeleteLyric = async (e: React.MouseEvent, projectId: string) => {
+    e.stopPropagation();
+
+    if (deleteConfirm === projectId) {
+      try {
+        await deleteLyricProject(projectId);
+        setLyricProjects((prev) => prev.filter((p) => p.id !== projectId));
+      } catch (err) {
+        console.error('Failed to delete lyric project:', err);
+      }
+      setDeleteConfirm(null);
+    } else {
+      setDeleteConfirm(projectId);
+      setTimeout(() => setDeleteConfirm(null), 3000);
     }
   };
 
@@ -75,10 +109,54 @@ export function RecentProjects({ onProjectSelect, onNewProject }: RecentProjects
     <div className={styles.container}>
       <div className={styles.header}>
         <h2 className={styles.title}>Recent Projects</h2>
-        <button onClick={onNewProject} className={styles.newButton}>
-          + New Project
-        </button>
+        <div className={styles.headerButtons}>
+          <button onClick={onNewLyricProject} className={styles.newButtonAlt}>
+            + New Lyric Video
+          </button>
+          <button onClick={onNewProject} className={styles.newButton}>
+            + New Project
+          </button>
+        </div>
       </div>
+
+      {lyricProjects.length > 0 && (
+        <>
+          <h3 className={styles.sectionTitle}>Lyric videos</h3>
+          <div className={styles.grid}>
+            {lyricProjects.map((project) => (
+              <div
+                key={project.id}
+                className={styles.card}
+                onClick={() => onLyricProjectSelect(project.id)}
+              >
+                <div className={styles.cardThumbnail}>
+                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                    <path d="M9 18V5l12-2v13" />
+                    <circle cx="6" cy="18" r="3" />
+                    <circle cx="18" cy="16" r="3" />
+                  </svg>
+                </div>
+                <div className={styles.cardContent}>
+                  <h3 className={styles.cardTitle}>{project.name}</h3>
+                  <p className={styles.cardMeta}>{project.audioFileName}</p>
+                  <p className={styles.cardDate}>
+                    {project.lineCount} line{project.lineCount === 1 ? '' : 's'} ·{' '}
+                    {formatDate(project.lastModifiedAt)}
+                  </p>
+                </div>
+                <button
+                  className={`${styles.deleteButton} ${deleteConfirm === project.id ? styles.deleteConfirm : ''}`}
+                  onClick={(e) => handleDeleteLyric(e, project.id)}
+                  title={deleteConfirm === project.id ? 'Click again to confirm' : 'Delete lyric video'}
+                >
+                  {deleteConfirm === project.id ? 'Confirm?' : '×'}
+                </button>
+              </div>
+            ))}
+          </div>
+          <h3 className={styles.sectionTitle}>Subtitle projects</h3>
+        </>
+      )}
 
       {projects.length === 0 ? (
         <div className={styles.empty}>
