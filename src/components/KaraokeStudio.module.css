@@ -138,6 +138,23 @@
   color: #f0d199;
 }
 
+/* Sits inside the warning, so the fix is one click from the explanation. */
+.warningBtn {
+  margin-left: 2px;
+  padding: 2px 9px;
+  font: inherit;
+  font-weight: 600;
+  color: #ffe9c2;
+  background: rgba(220, 170, 70, 0.22);
+  border: 1px solid rgba(220, 170, 70, 0.6);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.warningBtn:hover {
+  background: rgba(220, 170, 70, 0.35);
+}
+
 .body {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 340px;

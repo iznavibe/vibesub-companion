@@ -4,6 +4,7 @@ import {
   DEFAULT_EMPHASIS_SUNG,
   KaraokeLine,
   KaraokeStyle,
+  KaraokeSyllable,
   LyricProject,
   TextAlign,
 } from '../types/karaoke';
@@ -20,14 +21,20 @@ interface KaraokeStylePanelProps {
   /** Move or resize the selected track's panel. */
   onPanelChange: (patch: Partial<LyricProject['panel']>) => void;
   selectedLineIndex: number | null;
-  selectedSyllable: number | null;
+  /** Every selected word, in the order they are sung. */
+  words: KaraokeSyllable[];
+  /** The span the selection covers, or null when none of it is timed. */
+  wordSpan: { start: number; end: number } | null;
   selectedNoteId: string | null;
   onStyleChange: (patch: Partial<KaraokeStyle>) => void;
   onProjectChange: (patch: Partial<LyricProject>) => void;
   onLineChange: (index: number, patch: Partial<KaraokeLine>) => void;
-  onSyllableColor: (base: string | undefined, sung: string | undefined) => void;
-  onSyllableStrike: () => void;
-  onSyllableAlpha: (base: number | undefined, sung: number | undefined) => void;
+  /** Change every selected word at once. */
+  onWordsPatch: (patch: Partial<KaraokeSyllable>) => void;
+  /** Stretch the selection into a new span, keeping its rhythm. */
+  onWordsRetime: (start: number, end: number) => void;
+  /** Give every selected word an equal share of the span. */
+  onWordsSpread: () => void;
   presets: ColorPreset[];
   defaultPresetId: string | null;
   onApplyPreset: (preset: ColorPreset) => void;
@@ -99,14 +106,15 @@ export function KaraokeStylePanel({
   onResetTrackStyle,
   onPanelChange,
   selectedLineIndex,
-  selectedSyllable,
+  words,
+  wordSpan,
   selectedNoteId,
   onStyleChange,
   onProjectChange,
   onLineChange,
-  onSyllableColor,
-  onSyllableStrike,
-  onSyllableAlpha,
+  onWordsPatch,
+  onWordsRetime,
+  onWordsSpread,
   presets,
   defaultPresetId,
   onApplyPreset,
@@ -137,8 +145,21 @@ export function KaraokeStylePanel({
     selectedTrack === 1 ? project.romaji?.panel ?? project.panel : project.panel;
   const trackLinesList = selectedTrack === 1 ? project.romaji?.lines ?? [] : project.lines;
   const line = selectedLineIndex !== null ? trackLinesList[selectedLineIndex] : null;
-  const syllable =
-    line && selectedSyllable !== null ? line.syllables[selectedSyllable] : null;
+  // One value shared by every selected word, or undefined when they disagree —
+  // an input showing one word's colour for a mixed selection would lie about
+  // what the next edit is going to do.
+  const shared = <T,>(read: (w: KaraokeSyllable) => T): T | undefined => {
+    if (words.length === 0) return undefined;
+    const first = read(words[0]);
+    return words.every((w) => read(w) === first) ? first : undefined;
+  };
+  const mixed = <T,>(read: (w: KaraokeSyllable) => T): boolean =>
+    words.length > 1 && shared(read) === undefined;
+  const allStruck = words.length > 0 && words.every((w) => w.strike === true);
+  const wordLabel =
+    words.length === 1
+      ? words[0].text.trim()
+      : `${words.length} words`;
   const notes = project.annotations ?? [];
   const note = notes.find((n) => n.id === selectedNoteId) ?? null;
   const loadedFamilies = (project.fonts ?? []).map((f) => f.family);
@@ -418,10 +439,10 @@ export function KaraokeStylePanel({
                 <button
                   className={styles.presetAction}
                   onClick={() => onApplyPresetToWord(preset)}
-                  disabled={!syllable}
-                  title="Apply to just the selected word"
+                  disabled={words.length === 0}
+                  title="Apply to the selected words only"
                 >
-                  word
+                  {words.length > 1 ? 'words' : 'word'}
                 </button>
                 <button
                   className={styles.presetAction}
@@ -669,33 +690,43 @@ export function KaraokeStylePanel({
 
       <section className={styles.section}>
         <h4 className={styles.heading}>
-          Selected word
-          {syllable ? <span className={styles.badge}>{syllable.text.trim()}</span> : null}
+          {words.length > 1 ? 'Selected words' : 'Selected word'}
+          {words.length > 0 ? <span className={styles.badge}>{wordLabel}</span> : null}
         </h4>
-        {syllable ? (
+        {words.length > 0 ? (
           <>
             <Field label="Before sung">
               <ColorInput
-                value={syllable.baseColor ?? line?.baseColor ?? style.baseColor}
-                onChange={(v) => onSyllableColor(v, syllable.sungColor)}
+                value={shared((w) => w.baseColor) ?? line?.baseColor ?? style.baseColor}
+                onChange={(v) => onWordsPatch({ baseColor: v })}
               />
             </Field>
             <Field label="After sung">
               <ColorInput
-                value={syllable.sungColor ?? line?.sungColor ?? style.sungColor}
-                onChange={(v) => onSyllableColor(syllable.baseColor, v)}
+                value={shared((w) => w.sungColor) ?? line?.sungColor ?? style.sungColor}
+                onChange={(v) => onWordsPatch({ sungColor: v })}
               />
             </Field>
+            {(mixed((w) => w.baseColor) || mixed((w) => w.sungColor)) && (
+              <p className={styles.muted}>
+                These words don’t all share a colour — picking one sets them all.
+              </p>
+            )}
             <div className={styles.buttonRow}>
               <button
                 className={styles.smallBtn}
-                onClick={() => onSyllableColor(DEFAULT_EMPHASIS_BASE, DEFAULT_EMPHASIS_SUNG)}
+                onClick={() =>
+                  onWordsPatch({
+                    baseColor: DEFAULT_EMPHASIS_BASE,
+                    sungColor: DEFAULT_EMPHASIS_SUNG,
+                  })
+                }
               >
                 Pink emphasis
               </button>
               <button
                 className={styles.smallBtn}
-                onClick={() => onSyllableColor(undefined, undefined)}
+                onClick={() => onWordsPatch({ baseColor: undefined, sungColor: undefined })}
               >
                 Clear
               </button>
@@ -705,15 +736,16 @@ export function KaraokeStylePanel({
                 <input
                   type="number"
                   className={styles.input}
-                  placeholder={String(style.baseAlpha ?? 100)}
-                  value={syllable.baseAlpha ?? ''}
+                  placeholder={
+                    mixed((w) => w.baseAlpha) ? 'mixed' : String(style.baseAlpha ?? 100)
+                  }
+                  value={shared((w) => w.baseAlpha) ?? ''}
                   min={0}
                   max={100}
                   onChange={(e) =>
-                    onSyllableAlpha(
-                      e.target.value === '' ? undefined : Number(e.target.value),
-                      syllable.sungAlpha
-                    )
+                    onWordsPatch({
+                      baseAlpha: e.target.value === '' ? undefined : Number(e.target.value),
+                    })
                   }
                 />
               </Field>
@@ -721,31 +753,71 @@ export function KaraokeStylePanel({
                 <input
                   type="number"
                   className={styles.input}
-                  placeholder={String(style.sungAlpha ?? 100)}
-                  value={syllable.sungAlpha ?? ''}
+                  placeholder={
+                    mixed((w) => w.sungAlpha) ? 'mixed' : String(style.sungAlpha ?? 100)
+                  }
+                  value={shared((w) => w.sungAlpha) ?? ''}
                   min={0}
                   max={100}
                   onChange={(e) =>
-                    onSyllableAlpha(
-                      syllable.baseAlpha,
-                      e.target.value === '' ? undefined : Number(e.target.value)
-                    )
+                    onWordsPatch({
+                      sungAlpha: e.target.value === '' ? undefined : Number(e.target.value),
+                    })
                   }
                 />
               </Field>
             </div>
             <div className={styles.buttonRow}>
               <button
-                className={syllable.strike ? styles.smallBtnActive : styles.smallBtn}
-                onClick={onSyllableStrike}
+                className={allStruck ? styles.smallBtnActive : styles.smallBtn}
+                onClick={() => onWordsPatch({ strike: !allStruck })}
               >
                 <s>Strikethrough</s>
               </button>
             </div>
+
+            {wordSpan && (
+              <>
+                <div className={styles.row}>
+                  <Field label="Starts at (s)">
+                    <input
+                      type="number"
+                      className={styles.input}
+                      value={Number(wordSpan.start.toFixed(2))}
+                      step={0.05}
+                      min={0}
+                      onChange={(e) => onWordsRetime(Number(e.target.value), wordSpan.end)}
+                    />
+                  </Field>
+                  <Field label="Ends at (s)">
+                    <input
+                      type="number"
+                      className={styles.input}
+                      value={Number(wordSpan.end.toFixed(2))}
+                      step={0.05}
+                      min={0}
+                      onChange={(e) => onWordsRetime(wordSpan.start, Number(e.target.value))}
+                    />
+                  </Field>
+                </div>
+                <p className={styles.muted}>
+                  Moving these keeps the rhythm inside the selection — every word
+                  keeps its share. Arrow keys nudge it without stretching.
+                </p>
+                {words.length > 1 && (
+                  <div className={styles.buttonRow}>
+                    <button className={styles.smallBtn} onClick={onWordsSpread}>
+                      Even out timings
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
           </>
         ) : (
           <p className={styles.muted}>
-            Click a word on the preview to recolour or strike just that word.
+            Click a word on the preview, or drag a box round several on the
+            timeline, to recolour or retime just those.
           </p>
         )}
       </section>

@@ -170,7 +170,18 @@ function buildKaraokeRun(
       style.sweepMode === 'continuous' && next ? Math.max(next.start, syl.start) : syl.end;
 
     tags.push(`\\kf${durationTo(sweepEnd)}`);
-    parts.push(`{${tags.join('')}}${escapeAssText(syl.text)}`);
+
+    // A word carries the space that follows it, so that the sweep crosses the
+    // gap at a steady pace. The rule through the word must stop at the glyphs,
+    // so the space goes out as its own unstruck run inside the same syllable.
+    const trailing = /\s+$/.exec(syl.text)?.[0] ?? '';
+    if (strike && trailing) {
+      const core = syl.text.slice(0, syl.text.length - trailing.length);
+      parts.push(`{${tags.join('')}}${escapeAssText(core)}{\\s0}${escapeAssText(trailing)}`);
+      activeStrike = false;
+    } else {
+      parts.push(`{${tags.join('')}}${escapeAssText(syl.text)}`);
+    }
 
     // Hold the fill until the next syllable begins, but only within this row —
     // the gap across a row break belongs to the next row's lead-in.

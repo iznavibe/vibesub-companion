@@ -12,6 +12,12 @@ export interface SyllableBox {
   /** Canvas-space left edge and width of this syllable within its row. */
   x: number;
   width: number;
+  /**
+   * Width of the visible glyphs alone, with the trailing space a word carries
+   * excluded. The sweep uses the full advance so it moves at a steady pace
+   * across the gap between words; a rule drawn through the word must not.
+   */
+  inkWidth: number;
 }
 
 export interface RowLayout {
@@ -29,6 +35,12 @@ export interface LineLayout {
   rows: RowLayout[];
   /** Total vertical space this line occupies, including wrapped rows. */
   height: number;
+  /**
+   * Height down to the bottom of the last row's glyphs, without the leading
+   * that follows them. What the panel has to contain is the text, not the gap
+   * the next line would have sat in.
+   */
+  inkHeight: number;
 }
 
 export function cssFont(style: KaraokeStyle, fontSize: number): string {
@@ -154,7 +166,13 @@ export function layoutLine(
 
     const before = measure(rowText);
     const after = measure(rowText + text);
-    rowBoxes.push({ index: i, x: before, width: after - before });
+    const inkEnd = measure(rowText + text.replace(/\s+$/, ''));
+    rowBoxes.push({
+      index: i,
+      x: before,
+      width: after - before,
+      inkWidth: Math.max(0, inkEnd - before),
+    });
     rowText += text;
   }
   flushRow(rowFirst);
@@ -165,7 +183,19 @@ export function layoutLine(
     row.originY = y + i * lineHeight + line.offsetY;
   });
 
-  return { rows, height: Math.max(1, rows.length) * lineHeight };
+  // The text is drawn from `originY` downwards, so a row reaches as far as the
+  // font's own ascent plus descent — usually less than the line spacing.
+  const metrics = ctx.measureText('Hg');
+  const glyphs =
+    (metrics.fontBoundingBoxAscent ?? 0) + (metrics.fontBoundingBoxDescent ?? 0) || size;
+  const rowInk = Math.min(lineHeight, glyphs * scaleYOf(style));
+  const rowCount = Math.max(1, rows.length);
+
+  return {
+    rows,
+    height: rowCount * lineHeight,
+    inkHeight: (rowCount - 1) * lineHeight + rowInk,
+  };
 }
 
 /** Syllable indices at which a new row begins, for the ASS `\N` breaks. */
@@ -418,7 +448,7 @@ export function drawLine(
         ctx.clip();
         paintText(ctx, rowText, row.originX, row.originY, base, style, scale, baseAlpha, band);
         if (syl.strike) {
-          drawStrike(ctx, left, box.width, strikeY, strikeThickness, base, style, baseAlpha);
+          drawStrike(ctx, left, box.inkWidth, strikeY, strikeThickness, base, style, baseAlpha);
         }
         ctx.restore();
       }
@@ -430,7 +460,7 @@ export function drawLine(
         ctx.clip();
         paintText(ctx, rowText, row.originX, row.originY, sung, style, scale, sungAlpha, band);
         if (syl.strike) {
-          drawStrike(ctx, left, box.width, strikeY, strikeThickness, sung, style, sungAlpha);
+          drawStrike(ctx, left, box.inkWidth, strikeY, strikeThickness, sung, style, sungAlpha);
         }
         ctx.restore();
       }
@@ -451,10 +481,8 @@ function drawStrike(
 ) {
   ctx.save();
   ctx.globalAlpha = Math.max(0, Math.min(100, opacity)) / 100;
-  // Trim the trailing space a syllable carries, so the rule stops at the word.
-  const inset = width * 0.04;
-  const x0 = x + inset;
-  const w = Math.max(1, width - inset * 2);
+  const x0 = x;
+  const w = Math.max(1, width);
 
   if (style.outlineWidth > 0) {
     ctx.fillStyle = style.outlineColor;
@@ -649,12 +677,15 @@ export function trackStyle(project: LyricProject, track: number): KaraokeStyle {
 export function fitsInPanel(
   panel: { y: number; height: number },
   lineTop: number,
-  lineHeight: number
+  inkHeight: number
 ): boolean {
   // A panel with no usable height never hides anything, which keeps older
   // projects and freshly-made ones from silently losing lines.
   if (panel.height <= 0) return true;
-  return lineTop + lineHeight <= panel.y + panel.height + 0.5;
+  // Measured against the glyphs rather than the line box: a last line was being
+  // dropped for the empty leading underneath it, which reads as the lyrics
+  // vanishing while the playhead still sits on their blocks.
+  return lineTop + inkHeight <= panel.y + panel.height + 0.5;
 }
 
 /** The panel a track is laid out inside. */
@@ -675,6 +706,35 @@ export function trackLines(project: LyricProject): KaraokeLine[][] {
  * measurement happens exactly once, on a canvas, and the exporter just replays
  * the break points as `\N`.
  */
+/**
+ * The panel height every block of a track would need to be shown in full.
+ *
+ * Blocks each restart at the top of the panel, so the answer is the tallest of
+ * them — measured to the bottom of the last line's glyphs, since the leading
+ * below them does not have to be inside the box.
+ */
+export function requiredPanelHeight(
+  ctx: CanvasRenderingContext2D,
+  project: LyricProject,
+  track = 0
+): number {
+  const panel = trackPanel(project, track);
+  const style = trackStyle(project, track);
+  const lines = trackLines(project)[track] ?? [];
+
+  let needed = 0;
+  for (const block of groupIntoBlocks(lines)) {
+    let offset = 0;
+    for (const lineIndex of block.lines) {
+      const line = lines[lineIndex];
+      const layout = layoutLine(ctx, line, style, panel.x, panel.width, panel.y + offset);
+      needed = Math.max(needed, offset + line.offsetY + layout.inkHeight);
+      offset += layout.height;
+    }
+  }
+  return Math.ceil(needed);
+}
+
 export function planLayout(
   ctx: CanvasRenderingContext2D,
   project: LyricProject,
@@ -695,7 +755,7 @@ export function planLayout(
       const layout = layoutLine(ctx, line, style, panel.x, panel.width, y);
       placements[lineIndex] = {
         y,
-        clipped: !fitsInPanel(panel, y, layout.height),
+        clipped: !fitsInPanel(panel, y + line.offsetY, layout.inkHeight),
         rows: layout.rows.map((row, i) => ({
           y: row.originY,
           first: row.firstSyllable,
@@ -736,7 +796,7 @@ export function drawFrame(
       for (const lineIndex of block.lines) {
         const line = lines[lineIndex];
         const layout = layoutLine(ctx, line, style, panel.x, panel.width, y);
-        const fits = fitsInPanel(panel, y, layout.height);
+        const fits = fitsInPanel(panel, y + line.offsetY, layout.inkHeight);
         // Advance whether or not this line is drawn, so lines inside a block
         // keep their places as others come and go.
         y += layout.height;

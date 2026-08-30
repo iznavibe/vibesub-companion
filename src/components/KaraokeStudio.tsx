@@ -3,6 +3,7 @@ import {
   Annotation,
   KaraokeLine,
   KaraokeStyle,
+  KaraokeSyllable,
   LyricProject,
   applyBackgroundVideo,
   createAnnotation,
@@ -34,10 +35,22 @@ import {
   normalizeTrackWindows,
   shiftLine,
   syncTrackWindows,
+  patchSelection,
+  retimeSelection,
+  selectedSyllables,
+  selectionSpan,
+  spreadSelection,
   type SyllableRef,
   splitSyllable,
 } from '../utils/karaokeText';
-import { BackgroundSource, layoutLine, fitsInPanel, trackPanel, trackStyle } from '../utils/karaokeRenderer';
+import {
+  BackgroundSource,
+  layoutLine,
+  fitsInPanel,
+  requiredPanelHeight,
+  trackPanel,
+  trackStyle,
+} from '../utils/karaokeRenderer';
 import { groupIntoBlocks } from '../utils/karaokeText';
 import { detectFlatPanel } from '../utils/flatRegion';
 import { KaraokeCanvas } from './KaraokeCanvas';
@@ -189,7 +202,8 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
   const [romajiText, setRomajiText] = useState('');
   // Selection can span lines, since the lane shows them all on one row.
   const [selection, setSelection] = useState<SyllableRef[]>([]);
-  // Most editing acts on a single word; the group is only for dragging.
+  // The single word under the caret, for the edits that only make sense on one
+  // — splitting a line, merging a word into its neighbour.
   const selectedSyllable =
     selection.length === 1 &&
     selection[0].track === selectedTrack &&
@@ -977,26 +991,6 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
     setSelectedNoteId(null);
   };
 
-  /** Set per-word opacity overrides; undefined falls back to the line/project. */
-  const handleSyllableAlpha = (base: number | undefined, sung: number | undefined) => {
-    if (selectedLine === null || selectedSyllable === null) return;
-    const line = current.lines[selectedLine];
-    if (!line) return;
-    const syllables = line.syllables.map((s, i) =>
-      i === selectedSyllable ? { ...s, baseAlpha: base, sungAlpha: sung } : s
-    );
-    handleLineChange(selectedLine, { ...line, syllables });
-  };
-
-  const handleToggleStrike = () => {
-    if (selectedLine === null || selectedSyllable === null) return;
-    const line = current.lines[selectedLine];
-    if (!line) return;
-    const syllables = line.syllables.map((s, i) =>
-      i === selectedSyllable ? { ...s, strike: !s.strike } : s
-    );
-    handleLineChange(selectedLine, { ...line, syllables });
-  };
 
   const handleLineChange = useCallback(
     (index: number, next: KaraokeLine, transient = false) => {
@@ -1015,11 +1009,27 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
   );
 
   /** Write back a whole set of tracks, splitting them into their two homes. */
+  /**
+   * Write both tracks back, re-deriving every block's window on the way.
+   *
+   * A block is on screen for exactly as long as its words are sung, so its
+   * window is a consequence of the timings rather than a value of its own.
+   * Recomputing here — the single door every lyric edit goes through — keeps
+   * that true by construction. Doing it at the call sites instead left the
+   * window behind whenever a word was dragged later or a line was added to a
+   * block already timed, and the lyrics then vanished mid-verse while the
+   * playhead was still sitting on their blocks.
+   */
   const setTracks = useCallback(
     (next: KaraokeLine[][], transient = false) => {
+      const { lines, romajiLines } = normalizeTrackWindows(next[0] ?? [], next[1] ?? [], {
+        leadIn: doc.value.blockLeadIn ?? 0,
+        fillGaps: doc.value.blockFillGaps ?? false,
+        holdOut: doc.value.blockHoldOut === undefined ? 1.5 : doc.value.blockHoldOut,
+      });
       const patchValue: Partial<LyricProject> = {
-        lines: next[0] ?? [],
-        romaji: { ...doc.value.romaji, lines: next[1] ?? [] },
+        lines,
+        romaji: { ...doc.value.romaji, lines: romajiLines },
       };
       if (transient) patchTransient(patchValue);
       else patch(patchValue);
@@ -1069,10 +1079,19 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
       const line = lines[index];
       if (!line || lineText(line) === text.trim()) return;
 
+      // A line added below another has no timings to anchor its words to, so
+      // it is told where it sits: otherwise its words land at the front of the
+      // song rather than beside the line they follow.
+      const previous = lines[index - 1];
+      const previousEnd = previous?.syllables.reduce(
+        (end, sy) => (sy.end > sy.start ? Math.max(end, sy.end) : end),
+        0
+      );
       const edited = editLineText(
         line,
         text,
-        track === 1 ? 'romaji' : doc.value.latinMode ?? 'word'
+        track === 1 ? 'romaji' : doc.value.latinMode ?? 'word',
+        previousEnd || line.appearAt || undefined
       );
       // A line emptied by clearing its text is kept, not dropped: it is almost
       // always a line being retyped, and deleting it under the caret is worse
@@ -1147,32 +1166,52 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
     [current, selectedTrack, patch]
   );
 
-  /** Apply a preset to just the selected word, for one-off emphasis. */
-  const handleApplyPresetToWord = useCallback(
-    (preset: ColorPreset) => {
-      if (selectedLine === null || selectedSyllable === null) return;
-      const lines = selectedTrack === 1 ? current.romaji?.lines ?? [] : current.lines;
-      const line = lines[selectedLine];
-      if (!line) return;
-      const syllables = line.syllables.map((sy, i) =>
-        i === selectedSyllable
-          ? {
-              ...sy,
-              baseColor: preset.baseColor,
-              sungColor: preset.sungColor,
-              baseAlpha: preset.baseAlpha,
-              sungAlpha: preset.sungAlpha,
-            }
-          : sy
-      );
-      const next = lines.map((l, i) => (i === selectedLine ? { ...l, syllables } : l));
+  /**
+   * Change every selected word at once.
+   *
+   * The selection can span lines and both tracks, so this goes through the
+   * track-wide helper rather than editing one line: recolouring a phrase is a
+   * single edit, and a single step to undo.
+   */
+  const handleWordsPatch = useCallback(
+    (wordPatch: Partial<KaraokeSyllable>) => {
+      if (selection.length === 0) return;
       setTracks(
-        selectedTrack === 1
-          ? [current.lines, next]
-          : [next, current.romaji?.lines ?? []]
+        patchSelection([current.lines, current.romaji?.lines ?? []], selection, wordPatch)
       );
     },
-    [current, selectedTrack, selectedLine, selectedSyllable, setTracks]
+    [current, selection, setTracks]
+  );
+
+  /** Stretch the selection into a new span, keeping the rhythm inside it. */
+  const handleWordsRetime = useCallback(
+    (start: number, end: number) => {
+      if (selection.length === 0) return;
+      setTracks(
+        retimeSelection([current.lines, current.romaji?.lines ?? []], selection, {
+          start,
+          end,
+        })
+      );
+    },
+    [current, selection, setTracks]
+  );
+
+  const handleWordsSpread = useCallback(() => {
+    if (selection.length === 0) return;
+    setTracks(spreadSelection([current.lines, current.romaji?.lines ?? []], selection));
+  }, [current, selection, setTracks]);
+
+  /** Apply a preset to the selected words, for one-off emphasis. */
+  const handleApplyPresetToWord = useCallback(
+    (preset: ColorPreset) =>
+      handleWordsPatch({
+        baseColor: preset.baseColor,
+        sungColor: preset.sungColor,
+        baseAlpha: preset.baseAlpha,
+        sungAlpha: preset.sungAlpha,
+      }),
+    [handleWordsPatch]
   );
 
   /**
@@ -1353,15 +1392,16 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
     setSelection([]);
   }, [selectedLine, selectedTrack, doc, setTracks]);
 
-  const handleSyllableColor = (base: string | undefined, sung: string | undefined) => {
-    if (selectedLine === null || selectedSyllable === null) return;
-    const line = current.lines[selectedLine];
-    if (!line) return;
-    const syllables = line.syllables.map((s, i) =>
-      i === selectedSyllable ? { ...s, baseColor: base, sungColor: sung } : s
-    );
-    handleLineChange(selectedLine, { ...line, syllables });
-  };
+
+  // Every selected word and the span it covers, for editing them as a group.
+  const selectedWords = useMemo(
+    () => selectedSyllables([current.lines, current.romaji?.lines ?? []], selection),
+    [current, selection]
+  );
+  const selectedWordSpan = useMemo(
+    () => selectionSpan([current.lines, current.romaji?.lines ?? []], selection),
+    [current, selection]
+  );
 
   const duration = current.duration;
   const selected = selectedLine !== null ? displayProject.lines[selectedLine] ?? null : null;
@@ -1443,26 +1483,51 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
    * Clipping is deliberate, but it must never be silent — a line vanishing with
    * no explanation is indistinguishable from a bug.
    */
-  const clippedCount = useMemo(() => {
+  const clipped = useMemo(() => {
     const canvasEl = document.createElement('canvas');
     const ctx = canvasEl.getContext('2d');
-    if (!ctx) return 0;
-    let count = 0;
+    if (!ctx) return { lines: [] as string[], needed: [0, 0] };
+
+    const dropped: string[] = [];
+    const needed = [0, 0];
     [displayProject.lines, displayProject.romaji?.enabled ? displayProject.romaji.lines : []]
       .forEach((lines, track) => {
+        if (lines.length === 0) return;
         const panel = trackPanel(displayProject, track);
         const style = trackStyle(displayProject, track);
         for (const block of groupIntoBlocks(lines)) {
           let y = panel.y;
           for (const i of block.lines) {
             const layout = layoutLine(ctx, lines[i], style, panel.x, panel.width, y);
-            if (!fitsInPanel(panel, y, layout.height)) count++;
+            if (!fitsInPanel(panel, y + lines[i].offsetY, layout.inkHeight)) {
+              dropped.push(lineText(lines[i]) || '(empty line)');
+            }
             y += layout.height;
           }
         }
+        needed[track] = requiredPanelHeight(ctx, displayProject, track);
       });
-    return count;
+    return { lines: dropped, needed };
   }, [displayProject]);
+
+  /** Grow each text box by just enough that nothing is dropped. */
+  const handleFitPanels = useCallback(() => {
+    const [mainNeeded, romajiNeeded] = clipped.needed;
+    const next: Partial<LyricProject> = {};
+    if (mainNeeded > current.panel.height) {
+      next.panel = { ...current.panel, height: mainNeeded };
+    }
+    if (current.romaji && romajiNeeded > (current.romaji.panel?.height ?? 0)) {
+      const romajiPanel = current.romaji.panel ?? current.panel;
+      next.romaji = {
+        ...current.romaji,
+        panel: { ...romajiPanel, height: romajiNeeded },
+      };
+    }
+    if (Object.keys(next).length === 0) return;
+    patch(next);
+    setStatus('Grew the text box so every line fits');
+  }, [clipped, current, patch]);
 
   const pct =
     renderProgress && renderProgress.totalFrames > 0
@@ -1529,10 +1594,17 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
 
       {error && <div className={styles.error}>{error}</div>}
       {!error && status && <div className={styles.status}>{status}</div>}
-      {clippedCount > 0 && (
+      {clipped.lines.length > 0 && (
         <div className={styles.warning}>
-          {clippedCount} line{clippedCount === 1 ? '' : 's'} fall outside the text box and will
-          not render. Make the box taller, or reduce the line spacing.
+          {clipped.lines.length} line{clipped.lines.length === 1 ? '' : 's'} fall outside the
+          text box, so {clipped.lines.length === 1 ? 'it does' : 'they do'} not show on the
+          video even while the playhead is on{' '}
+          {clipped.lines.length === 1 ? 'its' : 'their'} blocks:{' '}
+          <em>{clipped.lines.slice(0, 3).map((t) => `“${t}”`).join(', ')}</em>
+          {clipped.lines.length > 3 ? ` and ${clipped.lines.length - 3} more` : ''}.{' '}
+          <button className={styles.warningBtn} onClick={handleFitPanels}>
+            Grow the box to fit
+          </button>
         </div>
       )}
       {ffmpeg && !ffmpeg.found && (
@@ -1768,9 +1840,13 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
             </button>
             <button
               className={styles.toolBtn}
-              onClick={handleToggleStrike}
-              disabled={selectedSyllable === null}
-              title="Strike the word through — sing the other one instead"
+              onClick={() =>
+                handleWordsPatch({
+                  strike: !selectedWords.every((w) => w.strike === true),
+                })
+              }
+              disabled={selectedWords.length === 0}
+              title="Strike the words through — sing the other one instead"
             >
               <s>Strikethrough</s>
             </button>
@@ -2082,7 +2158,6 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
               selectedTrack={selectedTrack}
               onSelectTrack={setSelectedTrack}
               selectedLineIndex={selectedLine}
-              selectedSyllable={selectedSyllable}
               onStyleChange={(p: Partial<KaraokeStyle>) => {
                 // Romaji stores overrides only, so anything left alone keeps
                 // following the main lyric style.
@@ -2113,10 +2188,12 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
                 const line = current.lines[index];
                 if (line) handleLineChange(index, { ...line, ...p });
               }}
-              onSyllableColor={handleSyllableColor}
               selectedNoteId={selectedNoteId}
-              onSyllableStrike={handleToggleStrike}
-              onSyllableAlpha={handleSyllableAlpha}
+              words={selectedWords}
+              wordSpan={selectedWordSpan}
+              onWordsPatch={handleWordsPatch}
+              onWordsRetime={handleWordsRetime}
+              onWordsSpread={handleWordsSpread}
               presets={presets}
               defaultPresetId={defaultPresetId}
               onApplyPreset={handleApplyPreset}

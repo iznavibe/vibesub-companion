@@ -723,7 +723,13 @@ const MIN_INSERT = 0.12;
 export function editLineText(
   line: KaraokeLine,
   newText: string,
-  latinMode: LatinMode = 'word'
+  latinMode: LatinMode = 'word',
+  /**
+   * Where words should land when the line has no timings to anchor them to —
+   * a line just added below another, typically. Without it a fresh line starts
+   * at zero and its words appear at the very front of the song.
+   */
+  fallbackStart?: number
 ): KaraokeLine {
   const units = segmentLyricLine(newText, latinMode);
   if (units.length === 0) return { ...line, syllables: [] };
@@ -745,7 +751,7 @@ export function editLineText(
 
   if (anchored.size === 0) {
     // Nothing recognisable survived; spread the new words over the old span.
-    const from = span?.start ?? 0;
+    const from = span?.start ?? fallbackStart ?? line.appearAt ?? 0;
     const to = span?.end ?? from + Math.max(0.6, units.length * 0.33);
     return distributeEvenly({ ...line, syllables }, from, to);
   }
@@ -1089,6 +1095,136 @@ export function moveSyllables(
  * `track` is 0 for the main lyrics and 1 for the romaji beneath them, so one
  * selection can hold blocks from both and move them together.
  */
+/**
+ * Apply the same change to every selected word.
+ *
+ * Selecting a phrase and recolouring it in one go is the common case; doing it
+ * word by word is the same edit typed out several times, and each one lands as
+ * its own undo step.
+ */
+export function patchSelection(
+  tracks: TrackLines,
+  refs: SyllableRef[],
+  patch: Partial<KaraokeSyllable>
+): TrackLines {
+  if (refs.length === 0) return tracks;
+  const grouped = groupRefs(refs);
+  return tracks.map((lines, track) =>
+    lines.map((line, lineIndex) => {
+      const entry = grouped.get(`${track}:${lineIndex}`);
+      if (!entry) return line;
+      return {
+        ...line,
+        syllables: line.syllables.map((syl, i) =>
+          entry.set.has(i) ? { ...syl, ...patch } : syl
+        ),
+      };
+    })
+  );
+}
+
+/** Every selected word, in the order they are sung. */
+export function selectedSyllables(
+  tracks: TrackLines,
+  refs: SyllableRef[]
+): KaraokeSyllable[] {
+  const out: KaraokeSyllable[] = [];
+  for (const ref of refs) {
+    const syl = tracks[ref.track]?.[ref.line]?.syllables[ref.syllable];
+    if (syl) out.push(syl);
+  }
+  return out.sort((a, b) => a.start - b.start);
+}
+
+/** The span the selection covers, or null if none of it is timed. */
+export function selectionSpan(
+  tracks: TrackLines,
+  refs: SyllableRef[]
+): { start: number; end: number } | null {
+  let start = Number.POSITIVE_INFINITY;
+  let end = Number.NEGATIVE_INFINITY;
+  for (const syl of selectedSyllables(tracks, refs)) {
+    if (syl.end <= syl.start) continue;
+    start = Math.min(start, syl.start);
+    end = Math.max(end, syl.end);
+  }
+  return Number.isFinite(start) && Number.isFinite(end) ? { start, end } : null;
+}
+
+/**
+ * Stretch or squeeze the selection into a new span, keeping its rhythm.
+ *
+ * Every word keeps its share of the whole, so a phrase timed a beat too fast
+ * can be fixed by dragging its ends rather than retiming each word.
+ */
+export function retimeSelection(
+  tracks: TrackLines,
+  refs: SyllableRef[],
+  target: { start?: number; end?: number }
+): TrackLines {
+  const span = selectionSpan(tracks, refs);
+  if (!span) return tracks;
+
+  const start = target.start ?? span.start;
+  const end = Math.max(start + MIN_DURATION, target.end ?? span.end);
+  const oldWidth = span.end - span.start;
+  // A selection with no width can only be moved, not scaled.
+  const factor = oldWidth > 0 ? (end - start) / oldWidth : 1;
+  if (start === span.start && factor === 1) return tracks;
+
+  const at = (t: number) => start + (t - span.start) * factor;
+  const grouped = groupRefs(refs);
+
+  return tracks.map((lines, track) =>
+    lines.map((line, lineIndex) => {
+      const entry = grouped.get(`${track}:${lineIndex}`);
+      if (!entry) return line;
+      return {
+        ...line,
+        syllables: line.syllables.map((syl, i) =>
+          entry.set.has(i) && syl.end > syl.start
+            ? { ...syl, start: at(syl.start), end: at(syl.end) }
+            : syl
+        ),
+      };
+    })
+  );
+}
+
+/**
+ * Give every selected word the same duration, back to back across the span the
+ * selection already covers — the quick fix for a phrase tapped unevenly.
+ */
+export function spreadSelection(tracks: TrackLines, refs: SyllableRef[]): TrackLines {
+  const span = selectionSpan(tracks, refs);
+  if (!span) return tracks;
+
+  const ordered = [...refs]
+    .map((ref) => ({ ref, syl: tracks[ref.track]?.[ref.line]?.syllables[ref.syllable] }))
+    .filter((entry) => entry.syl !== undefined)
+    .sort((a, b) => a.syl!.start - b.syl!.start);
+  if (ordered.length === 0) return tracks;
+
+  const step = (span.end - span.start) / ordered.length;
+  const times = new Map<string, { start: number; end: number }>();
+  ordered.forEach((entry, i) => {
+    times.set(`${entry.ref.track}:${entry.ref.line}:${entry.ref.syllable}`, {
+      start: span.start + step * i,
+      end: span.start + step * (i + 1),
+    });
+  });
+
+  return tracks.map((lines, track) =>
+    lines.map((line, lineIndex) => ({
+      ...line,
+      syllables: line.syllables.map((syl, i) => {
+        const t = times.get(`${track}:${lineIndex}:${i}`);
+        return t ? { ...syl, ...t } : syl;
+      }),
+    }))
+  );
+}
+
 export interface SyllableRef {
   track: number;
   line: number;
