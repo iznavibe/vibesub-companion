@@ -49,6 +49,26 @@ function applyTextStyle(ctx: CanvasRenderingContext2D, style: KaraokeStyle, font
     `${style.letterSpacing}px`;
 }
 
+/**
+ * How much larger an ASS `Fontsize` must be to match a CSS font size.
+ *
+ * libass sizes text so that the font's ascent plus descent equals Fontsize,
+ * whereas canvas sizes it by the em square. For a font whose ascent+descent
+ * exceeds its em — most of them — text rendered at the same number is visibly
+ * smaller than the preview. Measured here rather than assumed, because the
+ * ratio is a property of the individual font.
+ */
+export function assFontScale(ctx: CanvasRenderingContext2D, style: KaraokeStyle): number {
+  applyTextStyle(ctx, style, style.fontSize);
+  const m = ctx.measureText('Hg');
+  const ascent = m.fontBoundingBoxAscent;
+  const descent = m.fontBoundingBoxDescent;
+  if (!Number.isFinite(ascent) || !Number.isFinite(descent) || style.fontSize <= 0) return 1;
+  const scale = (ascent + descent) / style.fontSize;
+  // Guard against a font reporting nonsense; 1 just means "no correction".
+  return scale > 0.5 && scale < 3 ? scale : 1;
+}
+
 /** Effective font size for a line, honouring its override. */
 export function lineFontSize(line: KaraokeLine, style: KaraokeStyle): number {
   return line.fontSize ?? style.fontSize;
@@ -362,7 +382,7 @@ export function drawLine(
   const sungDefault = line.sungColor ?? style.sungColor;
   const baseAlphaDefault = line.baseAlpha ?? style.baseAlpha ?? 100;
   const sungAlphaDefault = line.sungAlpha ?? style.sungAlpha ?? 100;
-  const strikeThickness = Math.max(1.5, size * 0.055);
+  const strikeThickness = Math.max(1, size * (style.strikeThickness ?? 0.055));
 
   for (const row of layout.rows) {
     // Each row is drawn as its own string so glyph positions stay exact.
@@ -370,7 +390,9 @@ export function drawLine(
     // Generous vertical band so outline, shadow and descenders are never clipped.
     const bandTop = row.originY - size;
     const bandHeight = size * 3;
-    const strikeY = row.originY + size * scaleYOf(style) * 0.5;
+    // Both are fractions of the type size, so the rule keeps its proportions
+    // when the text is resized.
+    const strikeY = row.originY + size * scaleYOf(style) * (style.strikeHeight ?? 0.5);
     // Whole-row extent: each pass draws the full row string, clipped.
     const band = {
       x: row.originX - size,

@@ -104,6 +104,23 @@ export function presetFromStyle(name: string, style: KaraokeStyle): ColorPreset 
   };
 }
 
+/**
+ * A new, empty preset: named, and black until its colours are set.
+ *
+ * Naming first and then dialling the colours in on the preset itself is the
+ * natural order — you know what you are making before you know its exact shade.
+ */
+export function blankPreset(name: string): ColorPreset {
+  return {
+    id: newId(),
+    name: name.trim() || 'Untitled',
+    baseColor: '#000000',
+    sungColor: '#000000',
+    baseAlpha: 100,
+    sungAlpha: 100,
+  };
+}
+
 /** Just the colour fields, for applying onto a style or a single word. */
 export function presetToStyle(preset: ColorPreset): Partial<KaraokeStyle> {
   return {

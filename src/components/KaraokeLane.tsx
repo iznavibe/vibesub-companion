@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Annotation } from '../types/karaoke';
 import { SyllableRef, TrackLines, moveSelection, setSyllableBoundary } from '../utils/karaokeText';
 import styles from './KaraokeLane.module.css';
 
@@ -25,6 +26,15 @@ interface KaraokeLaneProps {
   onSelectionChange: (refs: SyllableRef[]) => void;
   /** Rename a single word straight from its block on the lane. */
   onEditSyllable: (ref: SyllableRef, text: string) => void;
+  /** Text boxes, shown on their own row so their timing can be dragged. */
+  notes: Annotation[];
+  selectedNoteId: string | null;
+  onSelectNote: (id: string) => void;
+  onNoteTimingChange: (
+    id: string,
+    patch: { appearAt?: number | null; disappearAt?: number | null },
+    isDragging: boolean
+  ) => void;
 }
 
 const MIN_WINDOW = 0.4;
@@ -65,6 +75,10 @@ export function KaraokeLane({
   onDeleteSelection,
   onSelectionChange,
   onEditSyllable,
+  notes,
+  selectedNoteId,
+  onSelectNote,
+  onNoteTimingChange,
 }: KaraokeLaneProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
@@ -89,6 +103,7 @@ export function KaraokeLane({
         additive: boolean;
         moved: boolean;
       }
+    | { kind: 'note'; id: string; edge: 'start' | 'end' | 'move'; grabOffset: number }
     | null
   >(null);
   // The lines as they were when the drag began, so each move re-derives from a
@@ -262,6 +277,11 @@ export function KaraokeLane({
     [tracks]
   );
 
+  // Text boxes get their own row under the lyric rows, but only once there is
+  // one to show.
+  const noteRowTop = WAVE_HEIGHT + visibleTracks.length * ROW_HEIGHT;
+  const showNoteRow = notes.length > 0;
+
   // Delete removes the selected blocks. Ignored while typing so it does not
   // eat backspaces in the lyric box.
   useEffect(() => {
@@ -357,10 +377,44 @@ export function KaraokeLane({
     (e.currentTarget as Element).setPointerCapture(e.pointerId);
   };
 
+  const startNoteDrag = (
+    e: React.PointerEvent,
+    id: string,
+    edge: 'start' | 'end' | 'move',
+    from: number
+  ) => {
+    e.stopPropagation();
+    onSelectNote(id);
+    onDragStart();
+    dragRef.current = {
+      kind: 'note',
+      id,
+      edge,
+      grabOffset: edge === 'move' ? pointerTime(e) - from : 0,
+    };
+    (e.currentTarget as Element).setPointerCapture(e.pointerId);
+  };
+
   const handlePointerMove = (e: React.PointerEvent) => {
     const drag = dragRef.current;
     if (!drag) return;
     const t = pointerTime(e);
+
+    if (drag.kind === 'note') {
+      const note = notes.find((n) => n.id === drag.id);
+      if (!note) return;
+      const from = note.appearAt ?? 0;
+      const to = note.disappearAt ?? from + 2;
+      if (drag.edge === 'move') {
+        const start = Math.max(0, t - drag.grabOffset);
+        onNoteTimingChange(drag.id, { appearAt: start, disappearAt: start + (to - from) }, true);
+      } else if (drag.edge === 'start') {
+        onNoteTimingChange(drag.id, { appearAt: Math.max(0, Math.min(t, to - 0.1)) }, true);
+      } else {
+        onNoteTimingChange(drag.id, { disappearAt: Math.max(t, from + 0.1) }, true);
+      }
+      return;
+    }
 
     if (drag.kind === 'marquee') {
       drag.moved = true;
@@ -435,8 +489,17 @@ export function KaraokeLane({
           onSelectLine(first.track, first.line);
         }
       }
-    } else if (drag && dragBaseRef.current) {
+    } else if (drag?.kind === 'note') {
       // Commit one undo entry for the whole gesture.
+      const note = notes.find((n) => n.id === drag.id);
+      if (note) {
+        onNoteTimingChange(
+          drag.id,
+          { appearAt: note.appearAt, disappearAt: note.disappearAt },
+          false
+        );
+      }
+    } else if (drag && dragBaseRef.current) {
       onTracksChange(tracks, false);
     }
 
@@ -516,7 +579,9 @@ export function KaraokeLane({
       <div
         className={styles.track}
         ref={trackRef}
-        style={{ height: WAVE_HEIGHT + visibleTracks.length * ROW_HEIGHT }}
+        style={{
+          height: WAVE_HEIGHT + visibleTracks.length * ROW_HEIGHT + (showNoteRow ? ROW_HEIGHT : 0),
+        }}
         onPointerDown={handleTrackPointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={endDrag}
@@ -634,6 +699,51 @@ export function KaraokeLane({
             )}
           </div>
         ))}
+
+        {showNoteRow && (
+          <div className={styles.row} style={{ top: noteRowTop, height: ROW_HEIGHT }}>
+            <span className={styles.rowLabel}>Text boxes</span>
+            {notes.map((note) => {
+              const from = note.appearAt ?? 0;
+              const to = note.disappearAt ?? duration;
+              const left = timeToX(from);
+              const right = timeToX(to);
+              if (right < -40 || left > width + 40) return null;
+              return (
+                <div
+                  key={note.id}
+                  className={[
+                    styles.block,
+                    styles.noteBlock,
+                    note.id === selectedNoteId ? styles.blockSelected : '',
+                  ]
+                    .filter(Boolean)
+                    .join(' ')}
+                  style={{ left, width: Math.max(6, right - left) }}
+                  onPointerDown={(e) => startNoteDrag(e, note.id, 'move', from)}
+                  onPointerMove={handlePointerMove}
+                  onPointerUp={endDrag}
+                  onPointerCancel={endDrag}
+                  title={`${note.text} — ${from.toFixed(2)}s -> ${to.toFixed(2)}s`}
+                >
+                  <span
+                    className={styles.handleLeft}
+                    onPointerDown={(e) => startNoteDrag(e, note.id, 'start', from)}
+                    onPointerMove={handlePointerMove}
+                    onPointerUp={endDrag}
+                  />
+                  <span className={styles.blockText}>{note.text}</span>
+                  <span
+                    className={styles.handleRight}
+                    onPointerDown={(e) => startNoteDrag(e, note.id, 'end', from)}
+                    onPointerMove={handlePointerMove}
+                    onPointerUp={endDrag}
+                  />
+                </div>
+              );
+            })}
+          </div>
+        )}
 
         {marquee && (
           <div

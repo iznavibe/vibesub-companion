@@ -57,8 +57,8 @@ import {
 } from '../services/lyricSetService';
 import {
   ColorPreset,
+  blankPreset,
   loadColorPresets,
-  presetFromStyle,
   presetToStyle,
   saveColorPresets,
 } from '../services/colorPresetService';
@@ -1055,21 +1055,26 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
     []
   );
 
-  /** Store the colours currently in use under a name. */
-  const handleSavePreset = useCallback(
-    (name: string, makeDefault: boolean) => {
-      const style =
-        selectedTrack === 1
-          ? { ...current.style, ...(current.romaji?.style ?? {}) }
-          : current.style;
-      const preset = presetFromStyle(name, style);
-      persistPresets(
-        [...presets, preset],
-        makeDefault ? preset.id : defaultPresetId
-      );
-      setStatus(`Saved colour preset "${preset.name}"`);
+  /** Create a named preset, black until its colours are set on it. */
+  const handleCreatePreset = useCallback(
+    (name: string) => {
+      const preset = blankPreset(name);
+      persistPresets([...presets, preset], defaultPresetId);
+      setStatus(`Created "${preset.name}" — set its colours below`);
+      return preset.id;
     },
-    [current, selectedTrack, presets, defaultPresetId, persistPresets]
+    [presets, defaultPresetId, persistPresets]
+  );
+
+  /** Edit a preset in place. */
+  const handleUpdatePreset = useCallback(
+    (id: string, patch: Partial<ColorPreset>) => {
+      persistPresets(
+        presets.map((p) => (p.id === id ? { ...p, ...patch } : p)),
+        defaultPresetId
+      );
+    },
+    [presets, defaultPresetId, persistPresets]
   );
 
   const handleDeletePreset = useCallback(
@@ -1527,6 +1532,13 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
             onDeleteSelection={handleDeleteSelection}
             onSelectionChange={setSelection}
             onEditSyllable={handleEditSyllable}
+            notes={displayProject.annotations ?? []}
+            selectedNoteId={selectedNoteId}
+            onSelectNote={(id) => {
+              setSelectedNoteId(id);
+              setTab('style');
+            }}
+            onNoteTimingChange={(id, p, isDragging) => handleNoteChange(id, p, isDragging)}
           />
 
           <div className={styles.laneTools}>
@@ -1896,7 +1908,8 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
               defaultPresetId={defaultPresetId}
               onApplyPreset={handleApplyPreset}
               onApplyPresetToWord={handleApplyPresetToWord}
-              onSavePreset={handleSavePreset}
+              onCreatePreset={handleCreatePreset}
+              onUpdatePreset={handleUpdatePreset}
               onDeletePreset={handleDeletePreset}
               onSetDefaultPreset={handleSetDefaultPreset}
               onNoteChange={(id, p) => handleNoteChange(id, p)}

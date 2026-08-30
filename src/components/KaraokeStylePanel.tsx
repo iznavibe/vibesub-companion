@@ -32,7 +32,8 @@ interface KaraokeStylePanelProps {
   defaultPresetId: string | null;
   onApplyPreset: (preset: ColorPreset) => void;
   onApplyPresetToWord: (preset: ColorPreset) => void;
-  onSavePreset: (name: string, makeDefault: boolean) => void;
+  onCreatePreset: (name: string) => string;
+  onUpdatePreset: (id: string, patch: Partial<ColorPreset>) => void;
   onDeletePreset: (id: string) => void;
   onSetDefaultPreset: (id: string | null) => void;
   onNoteChange: (id: string, patch: Partial<Annotation>) => void;
@@ -106,7 +107,8 @@ export function KaraokeStylePanel({
   defaultPresetId,
   onApplyPreset,
   onApplyPresetToWord,
-  onSavePreset,
+  onCreatePreset,
+  onUpdatePreset,
   onDeletePreset,
   onSetDefaultPreset,
   onNoteChange,
@@ -133,7 +135,9 @@ export function KaraokeStylePanel({
   const note = notes.find((n) => n.id === selectedNoteId) ?? null;
   const loadedFamilies = (project.fonts ?? []).map((f) => f.family);
   const [presetName, setPresetName] = useState('');
-  const [presetAsDefault, setPresetAsDefault] = useState(false);
+  // Which preset's colours are open for editing.
+  const [editingPresetId, setEditingPresetId] = useState<string | null>(null);
+  const editingPreset = presets.find((p) => p.id === editingPresetId) ?? null;
 
   // Line height is stored in pixels, but people think in multiples of the type
   // size, so the control works in multiples and converts.
@@ -403,6 +407,15 @@ export function KaraokeStylePanel({
                 </button>
                 <button
                   className={styles.presetAction}
+                  onClick={() =>
+                    setEditingPresetId(editingPresetId === preset.id ? null : preset.id)
+                  }
+                  title="Edit this preset's colours"
+                >
+                  ✎
+                </button>
+                <button
+                  className={styles.presetAction}
                   onClick={() => onDeletePreset(preset.id)}
                   title="Delete this preset"
                 >
@@ -415,12 +428,12 @@ export function KaraokeStylePanel({
         <div className={styles.buttonRow}>
           <input
             className={styles.input}
-            placeholder="Name these colours…"
+            placeholder="Name a new preset…"
             value={presetName}
             onChange={(e) => setPresetName(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && presetName.trim()) {
-                onSavePreset(presetName, presetAsDefault);
+                setEditingPresetId(onCreatePreset(presetName));
                 setPresetName('');
               }
             }}
@@ -429,21 +442,82 @@ export function KaraokeStylePanel({
             className={styles.smallBtn}
             disabled={!presetName.trim()}
             onClick={() => {
-              onSavePreset(presetName, presetAsDefault);
+              setEditingPresetId(onCreatePreset(presetName));
               setPresetName('');
             }}
           >
-            Save
+            Create
           </button>
         </div>
-        <label className={styles.check}>
-          <input
-            type="checkbox"
-            checked={presetAsDefault}
-            onChange={(e) => setPresetAsDefault(e.target.checked)}
-          />
-          Make it the default for new projects
-        </label>
+
+        {editingPreset && (
+          <div className={styles.presetEditor}>
+            <div className={styles.presetEditorHead}>
+              <input
+                className={styles.input}
+                value={editingPreset.name}
+                onChange={(e) => onUpdatePreset(editingPreset.id, { name: e.target.value })}
+              />
+              <button className={styles.smallBtn} onClick={() => setEditingPresetId(null)}>
+                Done
+              </button>
+            </div>
+            <Field label="Before sung">
+              <ColorInput
+                value={editingPreset.baseColor}
+                onChange={(v) => onUpdatePreset(editingPreset.id, { baseColor: v })}
+              />
+            </Field>
+            <Field label="After sung">
+              <ColorInput
+                value={editingPreset.sungColor}
+                onChange={(v) => onUpdatePreset(editingPreset.id, { sungColor: v })}
+              />
+            </Field>
+            <div className={styles.row}>
+              <Field label="Opacity before %">
+                <input
+                  type="number"
+                  className={styles.input}
+                  value={editingPreset.baseAlpha}
+                  min={0}
+                  max={100}
+                  onChange={(e) =>
+                    onUpdatePreset(editingPreset.id, { baseAlpha: Number(e.target.value) })
+                  }
+                />
+              </Field>
+              <Field label="Opacity after %">
+                <input
+                  type="number"
+                  className={styles.input}
+                  value={editingPreset.sungAlpha}
+                  min={0}
+                  max={100}
+                  onChange={(e) =>
+                    onUpdatePreset(editingPreset.id, { sungAlpha: Number(e.target.value) })
+                  }
+                />
+              </Field>
+            </div>
+            <div className={styles.buttonRow}>
+              <button
+                className={styles.smallBtn}
+                onClick={() =>
+                  onUpdatePreset(editingPreset.id, {
+                    baseColor: style.baseColor,
+                    sungColor: style.sungColor,
+                    baseAlpha: style.baseAlpha ?? 100,
+                    sungAlpha: style.sungAlpha ?? 100,
+                  })
+                }
+                title="Copy the colours this row is using right now"
+              >
+                Take from current row
+              </button>
+            </div>
+          </div>
+        )}
       </section>
 
       <section className={styles.section}>
@@ -493,6 +567,35 @@ export function KaraokeStylePanel({
             Fade out 100 → 50
           </button>
         </div>
+
+        <div className={styles.row}>
+          <Field label="Strike thickness">
+            <input
+              type="number"
+              className={styles.input}
+              value={Math.round((style.strikeThickness ?? 0.055) * 100)}
+              min={1}
+              max={30}
+              onChange={(e) =>
+                onStyleChange({ strikeThickness: Math.max(0.01, Number(e.target.value) / 100) })
+              }
+            />
+          </Field>
+          <Field label="Strike height">
+            <input
+              type="number"
+              className={styles.input}
+              value={Math.round((style.strikeHeight ?? 0.5) * 100)}
+              min={0}
+              max={120}
+              onChange={(e) => onStyleChange({ strikeHeight: Number(e.target.value) / 100 })}
+            />
+          </Field>
+        </div>
+        <p className={styles.muted}>
+          Both are percentages of the type size. Height 0 sits at the top of the glyphs, 100 on
+          the baseline.
+        </p>
 
         <div className={styles.row}>
           <Field label="Outline">

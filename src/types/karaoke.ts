@@ -92,6 +92,13 @@ export interface KaraokeStyle {
   /** Shadow offset in px, down-right. 0 disables. */
   shadowOffset: number;
 
+  /**
+   * Strikethrough rule, as fractions of the type size: how thick it is, and how
+   * far down the glyph it sits (0 is the cap line, 1 the baseline).
+   */
+  strikeThickness: number;
+  strikeHeight: number;
+
   sweepMode: SweepMode;
 }
 
@@ -236,6 +243,8 @@ export const DEFAULT_KARAOKE_STYLE: KaraokeStyle = {
   outlineWidth: 3,
   shadowColor: '#000000',
   shadowOffset: 0,
+  strikeThickness: 0.055,
+  strikeHeight: 0.5,
   sweepMode: 'hold',
 };
 
@@ -335,6 +344,8 @@ export function migrateLyricProject(project: LyricProject): LyricProject {
       scaleY: project.style?.scaleY ?? 100,
       baseAlpha: project.style?.baseAlpha ?? 100,
       sungAlpha: project.style?.sungAlpha ?? 100,
+      strikeThickness: project.style?.strikeThickness ?? 0.055,
+      strikeHeight: project.style?.strikeHeight ?? 0.5,
     },
   };
 }

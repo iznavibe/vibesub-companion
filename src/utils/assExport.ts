@@ -214,6 +214,12 @@ export interface AssBuildOptions {
   layout?: AssLinePlacement[];
   /** The same, measured for the romaji track. */
   romajiLayout?: AssLinePlacement[];
+  /**
+   * Multiplier turning a CSS font size into the ASS `Fontsize` that renders at
+   * the same visual size. See `assFontScale`; 1 disables the correction.
+   */
+  fontScale?: number;
+  romajiFontScale?: number;
 }
 
 /**
@@ -230,12 +236,15 @@ export function buildAssScript(project: LyricProject, options: AssBuildOptions):
   const romajiEnabled = !!project.romaji?.enabled && project.romaji.lines.length > 0;
   const romajiStyle: KaraokeStyle = { ...style, ...(project.romaji?.style ?? {}) };
 
+  const fontScale = options.fontScale ?? 1;
+  const romajiFontScale = options.romajiFontScale ?? fontScale;
+
   /** One `[V4+ Styles]` row. */
-  const styleRow = (name: string, s: KaraokeStyle) =>
+  const styleRow = (name: string, s: KaraokeStyle, scale: number) =>
     [
       `Style: ${name}`,
       s.fontFamily,
-      Math.round(s.fontSize),
+      Math.round(s.fontSize * scale),
       // PrimaryColour is the sung colour; SecondaryColour is what \kf sweeps
       // from. The alpha byte in each carries the corresponding opacity.
       toAssColor(s.sungColor, opacityToAssAlpha(s.sungAlpha ?? 100)),
@@ -274,13 +283,13 @@ export function buildAssScript(project: LyricProject, options: AssBuildOptions):
     'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour,' +
       ' BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle,' +
       ' BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
-    styleRow('Lyric', style),
-    styleRow('Romaji', romajiStyle),
+    styleRow('Lyric', style, fontScale),
+    styleRow('Romaji', romajiStyle, romajiFontScale),
     // Annotations are plain text boxes: no karaoke, their own colours.
     [
       'Style: Note',
       style.fontFamily,
-      Math.round(style.fontSize),
+      Math.round(style.fontSize * fontScale),
       toAssColor('#FFFFFF'),
       toAssColor('#FFFFFF'),
       toAssColor('#000000'),
@@ -319,7 +328,8 @@ export function buildAssScript(project: LyricProject, options: AssBuildOptions):
     trackStyle: KaraokeStyle,
     panel: LyricProject['panel'],
     styleName: string,
-    layout: AssBuildOptions['layout']
+    layout: AssBuildOptions['layout'],
+    scale: number
   ) => {
     // Anchor X to the alignment edge so \pos matches how the canvas lays out.
     const alignedX = (line: KaraokeLine) => {
@@ -355,7 +365,9 @@ export function buildAssScript(project: LyricProject, options: AssBuildOptions):
             const overrides: string[] = [
               `\\pos(${Math.round(x)},${Math.round(row.y + line.offsetY)})`,
             ];
-            if (size !== trackStyle.fontSize) overrides.push(`\\fs${Math.round(size)}`);
+            if (size !== trackStyle.fontSize) {
+              overrides.push(`\\fs${Math.round(size * scale)}`);
+            }
 
             const run = buildKaraokeRun(line, trackStyle, appear, row);
             const text = `{${overrides.join('')}}${run}`;
@@ -366,14 +378,22 @@ export function buildAssScript(project: LyricProject, options: AssBuildOptions):
       });
   };
 
-  const events = trackEvents(project.lines, style, project.panel, 'Lyric', options.layout);
+  const events = trackEvents(
+    project.lines,
+    style,
+    project.panel,
+    'Lyric',
+    options.layout,
+    fontScale
+  );
   const romajiEvents = romajiEnabled
     ? trackEvents(
         project.romaji.lines,
         romajiStyle,
         project.romaji.panel,
         'Romaji',
-        options.romajiLayout
+        options.romajiLayout,
+        romajiFontScale
       )
     : [];
 
@@ -388,7 +408,7 @@ export function buildAssScript(project: LyricProject, options: AssBuildOptions):
       const overrides = [
         `\\an${an}`,
         `\\pos(${Math.round(note.x)},${Math.round(note.y)})`,
-        `\\fs${Math.round(note.fontSize)}`,
+        `\\fs${Math.round(note.fontSize * fontScale)}`,
         `\\1c${toAssColorTag(note.color)}`,
         `\\3c${toAssColorTag(note.outlineColor)}`,
         `\\bord${note.outlineWidth}`,

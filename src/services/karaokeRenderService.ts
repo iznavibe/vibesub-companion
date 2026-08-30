@@ -1,6 +1,12 @@
 import { LyricProject } from '../types/karaoke';
 import { buildAssScript } from '../utils/assExport';
-import { drawBackground, planLayout, BackgroundSource } from '../utils/karaokeRenderer';
+import {
+  assFontScale,
+  drawBackground,
+  planLayout,
+  trackStyle,
+  BackgroundSource,
+} from '../utils/karaokeRenderer';
 import { isTauri } from './tauriService';
 
 /**
@@ -19,6 +25,9 @@ function measureLayout(project: LyricProject) {
   return {
     layout: planLayout(ctx, project, 0),
     romajiLayout: project.romaji?.enabled ? planLayout(ctx, project, 1) : undefined,
+    // Measured per track, since the two rows may use different fonts.
+    fontScale: assFontScale(ctx, trackStyle(project, 0)),
+    romajiFontScale: assFontScale(ctx, trackStyle(project, 1)),
   };
 }
 
