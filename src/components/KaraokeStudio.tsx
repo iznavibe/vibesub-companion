@@ -15,6 +15,10 @@ import { PanelTransform } from './KaraokeCanvas';
 import {
   appendBlock,
   applyBlockWindows,
+  applyTimingShape,
+  copyBlock,
+  pasteBlockAt,
+  type CopiedBlock,
   closeGaps,
   deleteSelection,
   editLineText,
@@ -184,6 +188,8 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
     [selectedLine, selectedTrack]
   );
   const [snapEnabled, setSnapEnabled] = useState(true);
+  // A block lifted out with its rhythm, for reusing on another verse.
+  const [copiedBlock, setCopiedBlock] = useState<CopiedBlock | null>(null);
   const [showGrid, setShowGrid] = useState(false);
   const [gridDivisions, setGridDivisions] = useState(3);
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
@@ -1160,6 +1166,72 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
     [doc, handleEditLine]
   );
 
+  const blockOptions = useCallback(
+    () => ({
+      leadIn: current.blockLeadIn ?? 0,
+      fillGaps: current.blockFillGaps ?? false,
+      holdOut: current.blockHoldOut === undefined ? 1.5 : current.blockHoldOut,
+    }),
+    [current.blockLeadIn, current.blockFillGaps, current.blockHoldOut]
+  );
+
+  const currentTrackLines = useCallback(
+    () => (selectedTrack === 1 ? doc.value.romaji?.lines ?? [] : doc.value.lines),
+    [doc, selectedTrack]
+  );
+
+  const writeTrackLines = useCallback(
+    (next: KaraokeLine[]) =>
+      setTracks(
+        selectedTrack === 1
+          ? [doc.value.lines, next]
+          : [next, doc.value.romaji?.lines ?? []]
+      ),
+    [doc, selectedTrack, setTracks]
+  );
+
+  /** Lift the selected verse out, rhythm and all. */
+  const handleCopyBlock = useCallback(() => {
+    if (selectedLine === null) return;
+    const copied = copyBlock(currentTrackLines(), selectedLine);
+    if (!copied) {
+      setError('That block has no timings to copy yet.');
+      return;
+    }
+    setError(null);
+    setCopiedBlock(copied);
+    setStatus(
+      `Copied ${copied.lines.length} line${copied.lines.length === 1 ? '' : 's'} (${copied.span.toFixed(
+        1
+      )}s) — paste at the playhead`
+    );
+  }, [selectedLine, currentTrackLines]);
+
+  /** Drop it back down at the playhead as a new verse. */
+  const handlePasteBlock = useCallback(() => {
+    if (!copiedBlock) return;
+    const lines = currentTrackLines();
+    const next = pasteBlockAt(lines, copiedBlock, currentTime, blockOptions());
+    writeTrackLines(next);
+    setSelectedLine(lines.length);
+    setSelection([]);
+    setStatus(`Pasted at ${currentTime.toFixed(2)}s with the same timings`);
+  }, [copiedBlock, currentTime, currentTrackLines, writeTrackLines, blockOptions]);
+
+  /** Keep this verse's words, take the copied verse's rhythm. */
+  const handlePasteTiming = useCallback(() => {
+    if (!copiedBlock || selectedLine === null) return;
+    const next = applyTimingShape(
+      currentTrackLines(),
+      selectedLine,
+      copiedBlock,
+      currentTime,
+      blockOptions()
+    );
+    writeTrackLines(next);
+    setStatus(`Retimed this block from ${currentTime.toFixed(2)}s, keeping its words`);
+  }, [copiedBlock, selectedLine, currentTime, currentTrackLines, writeTrackLines, blockOptions]);
+
   /** Break the selected line in two at the selected word. */
   const handleSplitLine = useCallback(() => {
     if (selectedLine === null || selectedSyllable === null) return;
@@ -1812,6 +1884,32 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
               <div className={styles.lineListHead}>
                 <span>{selectedTrack === 1 ? 'Romaji lines' : 'Lyric lines'}</span>
                 <span className={styles.lineListHint}>edit the text to change the words</span>
+              </div>
+              <div className={styles.buttonRow}>
+                <button
+                  className={styles.toolBtn}
+                  onClick={handleCopyBlock}
+                  disabled={selectedLine === null}
+                  title="Copy this verse, words and timings"
+                >
+                  Copy verse
+                </button>
+                <button
+                  className={styles.toolBtn}
+                  onClick={handlePasteBlock}
+                  disabled={!copiedBlock}
+                  title="Paste it as a new verse starting at the playhead"
+                >
+                  Paste verse
+                </button>
+                <button
+                  className={styles.toolBtn}
+                  onClick={handlePasteTiming}
+                  disabled={!copiedBlock || selectedLine === null}
+                  title="Keep this verse's words but take the copied verse's rhythm"
+                >
+                  Paste timing
+                </button>
               </div>
               <div className={styles.buttonRow}>
                 <button

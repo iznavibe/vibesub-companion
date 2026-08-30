@@ -498,6 +498,120 @@ export function syncTrackWindows(
 }
 
 /**
+ * A block lifted out with its timings made relative to its own start.
+ *
+ * Verses usually share a rhythm, so the useful thing to reuse is the shape of
+ * the timing rather than the absolute times. Storing offsets means the block
+ * can be dropped anywhere on the track and still sound right.
+ */
+export interface CopiedBlock {
+  /** Lines of syllables, each timed relative to the block's first word. */
+  lines: { text: string; syllables: { text: string; start: number; end: number }[] }[];
+  /** Total length, so a caller can report or scale it. */
+  span: number;
+}
+
+/** Lift the block containing `lineIndex` out, with timings made relative. */
+export function copyBlock(lines: KaraokeLine[], lineIndex: number): CopiedBlock | null {
+  const line = lines[lineIndex];
+  if (!line) return null;
+  const block = groupIntoBlocks(lines).find((b) => b.lines.includes(lineIndex));
+  if (!block) return null;
+
+  const members = block.lines.map((i) => lines[i]);
+  const timed = members.flatMap((l) => l.syllables.filter((sy) => sy.end > sy.start));
+  if (timed.length === 0) return null;
+
+  const origin = Math.min(...timed.map((sy) => sy.start));
+  const end = Math.max(...timed.map((sy) => sy.end));
+
+  return {
+    span: end - origin,
+    lines: members.map((l) => ({
+      text: lineText(l),
+      syllables: l.syllables.map((sy) => ({
+        text: sy.text,
+        start: sy.start - origin,
+        end: sy.end - origin,
+      })),
+    })),
+  };
+}
+
+/**
+ * Drop a copied block onto the track starting at `at`, as a new block.
+ *
+ * The words and the rhythm come across intact; only the position changes. This
+ * is the "verse two is the same as verse one" case.
+ */
+export function pasteBlockAt(
+  lines: KaraokeLine[],
+  copied: CopiedBlock,
+  at: number,
+  options: BlockWindowOptions = {}
+): KaraokeLine[] {
+  const id = nextBlockId();
+  const added: KaraokeLine[] = copied.lines.map((l) => ({
+    id: nextLineId(),
+    blockId: id,
+    appearAt: at,
+    disappearAt: null,
+    offsetX: 0,
+    offsetY: 0,
+    syllables: l.syllables.map((sy) => ({
+      text: sy.text,
+      start: at + sy.start,
+      end: at + sy.end,
+    })),
+  }));
+  return applyBlockWindows([...lines, ...added], options);
+}
+
+/**
+ * Retime an existing block using a copied block's rhythm, keeping its own words.
+ *
+ * Verses often share a cadence but not the wording. Where the syllable counts
+ * match the offsets are copied across exactly; where they differ each syllable
+ * takes the offset at the same relative position, which keeps the shape without
+ * requiring the two to line up.
+ */
+export function applyTimingShape(
+  lines: KaraokeLine[],
+  lineIndex: number,
+  copied: CopiedBlock,
+  at: number,
+  options: BlockWindowOptions = {}
+): KaraokeLine[] {
+  const block = groupIntoBlocks(lines).find((b) => b.lines.includes(lineIndex));
+  if (!block || copied.lines.length === 0) return lines;
+
+  const next = lines.map((l) => ({ ...l, syllables: l.syllables.map((sy) => ({ ...sy })) }));
+
+  block.lines.forEach((target, row) => {
+    // Fall back to the last copied row when the target block has more lines.
+    const source = copied.lines[Math.min(row, copied.lines.length - 1)];
+    if (!source || source.syllables.length === 0) return;
+
+    const line = next[target];
+    const count = line.syllables.length;
+    line.syllables = line.syllables.map((sy, i) => {
+      const pick =
+        count === source.syllables.length
+          ? source.syllables[i]
+          : source.syllables[
+              Math.min(
+                source.syllables.length - 1,
+                Math.round((i / Math.max(1, count - 1)) * (source.syllables.length - 1))
+              )
+            ];
+      return { ...sy, start: at + pick.start, end: at + pick.end };
+    });
+  });
+
+  return applyBlockWindows(next, options);
+}
+
+/**
  * Bring a project's visibility windows up to date.
  *
  * Called whenever a project is adopted, because a file saved before blocks (or
