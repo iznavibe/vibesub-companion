@@ -1,6 +1,6 @@
 [package]
 name = "vibesub-companion"
-version = "0.2.6"
+version = "0.2.7"
 description = "VibeSub - Korean to English Subtitle Translator"
 authors = ["VibeSub"]
 edition = "2021"

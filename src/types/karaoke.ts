@@ -151,6 +151,7 @@ export interface Annotation {
   x: number;
   y: number;
   fontSize: number;
+  /** Colour before the sweep reaches it. */
   color: string;
   bold: boolean;
   outlineColor: string;
@@ -159,6 +160,16 @@ export interface Annotation {
   /** Seconds; null means visible for the whole project. */
   appearAt: number | null;
   disappearAt: number | null;
+  /**
+   * Colour after the sweep has passed. When set, the box fills across its own
+   * window the way a lyric line does — a shout cue can then show how long it
+   * lasts rather than just appearing and vanishing. Leave it unset for a plain
+   * single-colour box.
+   */
+  sungColor?: string;
+  /** Opacity percentages, before and after the sweep. */
+  alpha?: number;
+  sungAlpha?: number;
 }
 
 /** A font file the user supplied, used by both the preview and the render. */

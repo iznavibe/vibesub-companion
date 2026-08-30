@@ -484,27 +484,80 @@ export function annotationBounds(
   return { x, y: note.y, width, height };
 }
 
-/** Draw one non-sung text box: a shout cue, a section label, a note. */
+/** How far a text box has filled at `time`, 0..1. */
+export function annotationProgress(note: Annotation, time: number, duration: number): number {
+  const from = note.appearAt ?? 0;
+  const to = note.disappearAt ?? duration;
+  if (!(to > from)) return 1;
+  return Math.max(0, Math.min(1, (time - from) / (to - from)));
+}
+
+/**
+ * Draw one text box: a shout cue, a section label, a note.
+ *
+ * With a sung colour set it fills across its own window like a lyric line, so a
+ * chant can show its length. The two passes cover disjoint halves for the same
+ * reason the lyrics do — overlapping them would let the base colour show
+ * through a semi-transparent fill.
+ */
 export function drawAnnotation(
   ctx: CanvasRenderingContext2D,
   note: Annotation,
   fontFamily: string,
-  scale: number
+  scale: number,
+  time = 0,
+  duration = 0
 ) {
   ctx.save();
   ctx.font = `${note.bold ? 'bold ' : ''}${note.fontSize}px "${fontFamily}", sans-serif`;
   ctx.textBaseline = 'top';
   ctx.textAlign = note.align === 'center' ? 'center' : note.align === 'right' ? 'right' : 'left';
 
-  if (note.outlineWidth > 0) {
-    ctx.lineJoin = 'round';
-    ctx.miterLimit = 2;
-    ctx.lineWidth = note.outlineWidth * 2 * scale;
-    ctx.strokeStyle = note.outlineColor;
-    ctx.strokeText(note.text, note.x, note.y);
+  const paint = (fill: string, opacity: number) => {
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, Math.min(100, opacity)) / 100;
+    if (note.outlineWidth > 0) {
+      ctx.lineJoin = 'round';
+      ctx.miterLimit = 2;
+      ctx.lineWidth = note.outlineWidth * 2 * scale;
+      ctx.strokeStyle = note.outlineColor;
+      ctx.strokeText(note.text, note.x, note.y);
+    }
+    ctx.fillStyle = fill;
+    ctx.fillText(note.text, note.x, note.y);
+    ctx.restore();
+  };
+
+  if (!note.sungColor) {
+    paint(note.color, note.alpha ?? 100);
+    ctx.restore();
+    return;
   }
-  ctx.fillStyle = note.color;
-  ctx.fillText(note.text, note.x, note.y);
+
+  const width = ctx.measureText(note.text).width;
+  const left =
+    note.align === 'center' ? note.x - width / 2 : note.align === 'right' ? note.x - width : note.x;
+  const bands = sweepBands(left, width, annotationProgress(note, time, duration));
+  const top = note.y - note.fontSize;
+  const height = note.fontSize * 3;
+
+  if (bands.unsung.width > 0) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(bands.unsung.x, top, bands.unsung.width, height);
+    ctx.clip();
+    paint(note.color, note.alpha ?? 100);
+    ctx.restore();
+  }
+  if (bands.sung.width > 0) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(bands.sung.x, top, bands.sung.width, height);
+    ctx.clip();
+    paint(note.sungColor, note.sungAlpha ?? note.alpha ?? 100);
+    ctx.restore();
+  }
+
   ctx.restore();
 }
 
@@ -699,6 +752,6 @@ export function drawFrame(
     const from = note.appearAt ?? 0;
     const to = note.disappearAt ?? duration;
     if (time < from || time > to) continue;
-    drawAnnotation(ctx, note, project.style.fontFamily, scale);
+    drawAnnotation(ctx, note, project.style.fontFamily, scale, time, duration);
   }
 }

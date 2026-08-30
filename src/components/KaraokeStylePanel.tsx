@@ -779,20 +779,80 @@ export function KaraokeStylePanel({
                 onChange={(e) => onNoteChange(note.id, { text: e.target.value })}
               />
             </Field>
+            <Field label="Size">
+              <input
+                type="number"
+                className={styles.input}
+                value={note.fontSize}
+                min={6}
+                onChange={(e) => onNoteChange(note.id, { fontSize: Number(e.target.value) })}
+              />
+            </Field>
+
+            <Field label="Before sung">
+              <ColorInput
+                value={note.color}
+                onChange={(v) => onNoteChange(note.id, { color: v })}
+              />
+            </Field>
+            <Field label="After sung">
+              <span className={styles.colorRow}>
+                <ColorInput
+                  value={note.sungColor ?? note.color}
+                  onChange={(v) => onNoteChange(note.id, { sungColor: v })}
+                />
+              </span>
+            </Field>
             <div className={styles.row}>
-              <Field label="Size">
+              <Field label="Opacity before %">
                 <input
                   type="number"
                   className={styles.input}
-                  value={note.fontSize}
-                  min={6}
-                  onChange={(e) => onNoteChange(note.id, { fontSize: Number(e.target.value) })}
+                  value={note.alpha ?? 100}
+                  min={0}
+                  max={100}
+                  onChange={(e) => onNoteChange(note.id, { alpha: Number(e.target.value) })}
                 />
               </Field>
-              <Field label="Colour">
-                <ColorInput value={note.color} onChange={(v) => onNoteChange(note.id, { color: v })} />
+              <Field label="Opacity after %">
+                <input
+                  type="number"
+                  className={styles.input}
+                  value={note.sungAlpha ?? note.alpha ?? 100}
+                  min={0}
+                  max={100}
+                  onChange={(e) => onNoteChange(note.id, { sungAlpha: Number(e.target.value) })}
+                />
               </Field>
             </div>
+            <div className={styles.buttonRow}>
+              <button
+                className={styles.smallBtn}
+                onClick={() =>
+                  onNoteChange(note.id, {
+                    color: style.baseColor,
+                    sungColor: style.sungColor,
+                    alpha: style.baseAlpha ?? 100,
+                    sungAlpha: style.sungAlpha ?? 100,
+                  })
+                }
+                title="Use the same colours as the lyrics"
+              >
+                Match the lyrics
+              </button>
+              <button
+                className={styles.smallBtn}
+                onClick={() => onNoteChange(note.id, { sungColor: undefined })}
+                disabled={!note.sungColor}
+                title="Keep one colour throughout instead of filling in"
+              >
+                No fill
+              </button>
+            </div>
+            <p className={styles.muted}>
+              With an after colour set, the box fills across its span on the lane — drag its
+              block there to set how long it takes.
+            </p>
             <div className={styles.row}>
               <Field label="X">
                 <input

@@ -405,19 +405,33 @@ export function buildAssScript(project: LyricProject, options: AssBuildOptions):
       const disappear = note.disappearAt ?? duration;
       const an = note.align === 'center' ? 8 : note.align === 'right' ? 9 : 7;
 
+      const baseAlpha = note.alpha ?? 100;
+      const sungAlpha = note.sungAlpha ?? baseAlpha;
+
       const overrides = [
         `\\an${an}`,
         `\\pos(${Math.round(note.x)},${Math.round(note.y)})`,
         `\\fs${Math.round(note.fontSize * fontScale)}`,
-        `\\1c${toAssColorTag(note.color)}`,
+        // Primary is the sung colour and secondary what the fill sweeps from,
+        // the same convention the lyric rows use.
+        `\\1c${toAssColorTag(note.sungColor ?? note.color)}`,
+        `\\2c${toAssColorTag(note.color)}`,
+        `\\1a${toAssAlphaTag(note.sungColor ? sungAlpha : baseAlpha)}`,
+        `\\2a${toAssAlphaTag(baseAlpha)}`,
         `\\3c${toAssColorTag(note.outlineColor)}`,
         `\\bord${note.outlineWidth}`,
         `\\b${note.bold ? 1 : 0}`,
       ].join('');
 
-      return `Dialogue: 1,${toAssTime(appear)},${toAssTime(disappear)},Note,,0,0,0,,{${overrides}}${escapeAssText(
-        note.text
-      )}`;
+      // With a sung colour the box fills across its own window; without one it
+      // just sits there in a single colour.
+      const body = note.sungColor
+        ? `{\\kf${Math.max(0, Math.round((disappear - appear) * 100))}}${escapeAssText(note.text)}`
+        : escapeAssText(note.text);
+
+      return `Dialogue: 1,${toAssTime(appear)},${toAssTime(
+        disappear
+      )},Note,,0,0,0,,{${overrides}}${body}`;
     });
 
   return [...header, ...events, ...romajiEvents, ...noteEvents, ''].join('\n');
