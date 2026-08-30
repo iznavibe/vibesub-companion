@@ -859,9 +859,11 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
     );
   };
 
+  const romajiMode = current.romaji?.latinMode ?? 'word';
+
   const handleApplyRomaji = () => {
     const existing = current.romaji?.lines ?? [];
-    const { lines: parsed } = parseLyricBlockDetailed(romajiText, existing, 'romaji');
+    const { lines: parsed } = parseLyricBlockDetailed(romajiText, existing, romajiMode);
 
     const lines = parsed.map((line, i) => {
       if (line.syllables.some((sy) => sy.end > sy.start)) return line;
@@ -1172,7 +1174,9 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
       const edited = editLineText(
         line,
         text,
-        track === 1 ? 'romaji' : doc.value.latinMode ?? 'word',
+        track === 1
+          ? doc.value.romaji?.latinMode ?? 'word'
+          : doc.value.latinMode ?? 'word',
         previousEnd || line.appearAt || undefined
       );
       // A line emptied by clearing its text is kept, not dropped: it is almost
@@ -1299,9 +1303,13 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
   /**
    * Rename one word from its block on the lane.
    *
-   * Rebuilt through the same line edit as the text field, so a rename that adds
-   * or removes words re-segments correctly instead of leaving one block holding
-   * several words.
+   * Only that block's text changes. Rebuilding the line and cutting it up again
+   * would be wrong here: a romaji row written from the Korean holds a unit per
+   * Korean syllable, and re-reading it as text would glue "a reum da um" back
+   * into one word and take four timings down to one. A rename is a rename.
+   *
+   * Typing several words into one block does split it, since that is plainly
+   * what was meant.
    */
   const handleEditSyllable = useCallback(
     (ref: SyllableRef, text: string) => {
@@ -1310,16 +1318,27 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
       if (!line) return;
       const original = line.syllables[ref.syllable];
       if (!original) return;
-      // Syllable texts already carry their own spacing — Korean has none between
-      // blocks — so rejoin without adding any, and keep whatever trailing space
-      // the replaced word had.
+
+      // Syllable texts carry their own spacing — Korean has none between
+      // blocks — so keep whatever trailing space the replaced word had.
       const trailing = /\s*$/.exec(original.text)?.[0] ?? '';
-      const words = line.syllables.map((sy, i) =>
-        i === ref.syllable ? text.trim() + trailing : sy.text
+      const typed = text.trim();
+
+      if (/\s/.test(typed)) {
+        const words = line.syllables.map((sy, i) =>
+          i === ref.syllable ? typed + trailing : sy.text
+        );
+        handleEditLine(ref.track, ref.line, words.join(''));
+        return;
+      }
+
+      setTracks(
+        patchSelection([doc.value.lines, doc.value.romaji?.lines ?? []], [ref], {
+          text: typed + trailing,
+        })
       );
-      handleEditLine(ref.track, ref.line, words.join(''));
     },
-    [doc, handleEditLine]
+    [doc, handleEditLine, setTracks]
   );
 
   const fanchant = current.fanchant ?? DEFAULT_FANCHANT;
@@ -2083,6 +2102,24 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
                         Romanize the Korean
                       </button>
                     </div>
+                    <label className={styles.modeRow}>
+                      <span>Romaji text</span>
+                      <select
+                        className={styles.modeSelect}
+                        value={romajiMode}
+                        onChange={(e) =>
+                          patch({
+                            romaji: {
+                              ...current.romaji,
+                              latinMode: e.target.value as 'word' | 'romaji',
+                            },
+                          })
+                        }
+                      >
+                        <option value="word">Per word — keep them whole</option>
+                        <option value="romaji">Per syllable — split them up</option>
+                      </select>
+                    </label>
                     <div className={styles.buttonRow}>
                       <button className={styles.toolBtn} onClick={handleApplyRomaji}>
                         Apply romaji

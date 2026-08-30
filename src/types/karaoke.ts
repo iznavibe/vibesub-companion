@@ -236,6 +236,14 @@ export interface RomajiTrack {
   panel: KaraokePanel;
   /** Applied on top of the main style; anything unset is inherited. */
   style: Partial<KaraokeStyle>;
+  /**
+   * How Latin text on this row is cut up. Whole words by default: the row is
+   * written from the Korean one now, which already carries the syllables, and
+   * anything typed by hand is a word the way it was typed — "Nananana" is one
+   * unit, not four. Per-syllable is still there for a row typed from scratch
+   * that has to pair with Korean syllables on its own.
+   */
+  latinMode?: 'word' | 'romaji';
 }
 
 export interface LyricProject {
