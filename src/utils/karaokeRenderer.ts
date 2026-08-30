@@ -1,5 +1,6 @@
 import {
   Annotation,
+  annotationWindow,
   KaraokeBackground,
   KaraokeLine,
   KaraokeStyle,
@@ -513,6 +514,13 @@ export function annotationBounds(
 }
 
 /** How far a text box has filled at `time`, 0..1. */
+/**
+ * How far the fill has crossed the box.
+ *
+ * Measured over the span the box is sung across, not the whole time it is on
+ * screen: a lead-in exists so the cue can be read before it is due, and it
+ * should sit there unsung rather than already half filled.
+ */
 export function annotationProgress(note: Annotation, time: number, duration: number): number {
   const from = note.appearAt ?? 0;
   const to = note.disappearAt ?? duration;
@@ -541,18 +549,69 @@ export function drawAnnotation(
   ctx.textBaseline = 'top';
   ctx.textAlign = note.align === 'center' ? 'center' : note.align === 'right' ? 'right' : 'left';
 
+  const font = ctx.font;
+  const align = ctx.textAlign;
+
+  /**
+   * Outline and fill are built at full strength on their own surface, then
+   * faded together. Drawing each at partial opacity instead lets the outline
+   * show through the glyphs, and with the black outline a box carries by
+   * default that reads as the opacity doing nothing at all.
+   */
   const paint = (fill: string, opacity: number) => {
-    ctx.save();
-    ctx.globalAlpha = Math.max(0, Math.min(100, opacity)) / 100;
-    if (note.outlineWidth > 0) {
+    const alpha = Math.max(0, Math.min(100, opacity)) / 100;
+    const stroke = () => {
+      if (note.outlineWidth <= 0) return;
       ctx.lineJoin = 'round';
       ctx.miterLimit = 2;
       ctx.lineWidth = note.outlineWidth * 2 * scale;
       ctx.strokeStyle = note.outlineColor;
       ctx.strokeText(note.text, note.x, note.y);
+    };
+
+    if (alpha >= 1 || note.outlineWidth <= 0) {
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      stroke();
+      ctx.fillStyle = fill;
+      ctx.fillText(note.text, note.x, note.y);
+      ctx.restore();
+      return;
     }
-    ctx.fillStyle = fill;
-    ctx.fillText(note.text, note.x, note.y);
+
+    const width = Math.max(1, Math.ceil(ctx.measureText(note.text).width + note.fontSize * 2));
+    const height = Math.max(1, Math.ceil(note.fontSize * 3));
+    const left = Math.floor(
+      (note.align === 'center'
+        ? note.x - width / 2
+        : note.align === 'right'
+          ? note.x - width + note.fontSize
+          : note.x - note.fontSize)
+    );
+    const top = Math.floor(note.y - note.fontSize);
+
+    const buffer = document.createElement('canvas');
+    buffer.width = width;
+    buffer.height = height;
+    const bctx = buffer.getContext('2d');
+    if (!bctx) return;
+    bctx.translate(-left, -top);
+    bctx.font = font;
+    bctx.textBaseline = 'top';
+    bctx.textAlign = align;
+    if (note.outlineWidth > 0) {
+      bctx.lineJoin = 'round';
+      bctx.miterLimit = 2;
+      bctx.lineWidth = note.outlineWidth * 2 * scale;
+      bctx.strokeStyle = note.outlineColor;
+      bctx.strokeText(note.text, note.x, note.y);
+    }
+    bctx.fillStyle = fill;
+    bctx.fillText(note.text, note.x, note.y);
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.drawImage(buffer, left, top);
     ctx.restore();
   };
 
@@ -809,8 +868,7 @@ export function drawFrame(
 
   // Annotations sit above the lyrics so a shout cue reads over them.
   for (const note of project.annotations ?? []) {
-    const from = note.appearAt ?? 0;
-    const to = note.disappearAt ?? duration;
+    const { from, to } = annotationWindow(note, duration);
     if (time < from || time > to) continue;
     drawAnnotation(ctx, note, project.style.fontFamily, scale, time, duration);
   }

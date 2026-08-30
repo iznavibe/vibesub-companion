@@ -1,9 +1,11 @@
 import {
   Annotation,
   DEFAULT_EMPHASIS_BASE,
+  DEFAULT_FANCHANT,
   DEFAULT_EMPHASIS_SUNG,
   KaraokeLine,
   KaraokeStyle,
+  FanchantLook,
   KaraokeSyllable,
   LyricProject,
   TextAlign,
@@ -29,6 +31,10 @@ interface KaraokeStylePanelProps {
   onStyleChange: (patch: Partial<KaraokeStyle>) => void;
   onProjectChange: (patch: Partial<LyricProject>) => void;
   onLineChange: (index: number, patch: Partial<KaraokeLine>) => void;
+  /** Set the selected words to the project's own look. */
+  onFanchantWords: () => void;
+  /** Set a text box to the project's own look. */
+  onFanchantNote: (id: string) => void;
   /** Change every selected word at once. */
   onWordsPatch: (patch: Partial<KaraokeSyllable>) => void;
   /** Stretch the selection into a new span, keeping its rhythm. */
@@ -112,6 +118,8 @@ export function KaraokeStylePanel({
   onStyleChange,
   onProjectChange,
   onLineChange,
+  onFanchantWords,
+  onFanchantNote,
   onWordsPatch,
   onWordsRetime,
   onWordsSpread,
@@ -160,6 +168,9 @@ export function KaraokeStylePanel({
     words.length === 1
       ? words[0].text.trim()
       : `${words.length} words`;
+  const fanchant = project.fanchant ?? DEFAULT_FANCHANT;
+  const setFanchant = (p: Partial<FanchantLook>) =>
+    onProjectChange({ fanchant: { ...fanchant, ...p } });
   const notes = project.annotations ?? [];
   const note = notes.find((n) => n.id === selectedNoteId) ?? null;
   const loadedFamilies = (project.fonts ?? []).map((f) => f.family);
@@ -690,6 +701,90 @@ export function KaraokeStylePanel({
 
       <section className={styles.section}>
         <h4 className={styles.heading}>
+          Fanchant colour
+          <span
+            className={styles.badge}
+            style={{ background: fanchant.baseColor, color: fanchant.sungColor }}
+          >
+            사랑
+          </span>
+        </h4>
+        <p className={styles.muted}>
+          The one look this project is built around. Pick it once and put it on
+          any word or text box with the Fanchant button.
+        </p>
+        <Field label="Before sung">
+          <ColorInput
+            value={fanchant.baseColor}
+            onChange={(v) => setFanchant({ baseColor: v })}
+          />
+        </Field>
+        <Field label="After sung">
+          <ColorInput
+            value={fanchant.sungColor}
+            onChange={(v) => setFanchant({ sungColor: v })}
+          />
+        </Field>
+        <div className={styles.row}>
+          <Field label="Opacity before %">
+            <input
+              type="number"
+              className={styles.input}
+              value={fanchant.baseAlpha}
+              min={0}
+              max={100}
+              onChange={(e) => setFanchant({ baseAlpha: Number(e.target.value) })}
+            />
+          </Field>
+          <Field label="Opacity after %">
+            <input
+              type="number"
+              className={styles.input}
+              value={fanchant.sungAlpha}
+              min={0}
+              max={100}
+              onChange={(e) => setFanchant({ sungAlpha: Number(e.target.value) })}
+            />
+          </Field>
+        </div>
+        <div className={styles.buttonRow}>
+          <button
+            className={styles.smallBtn}
+            onClick={() =>
+              setFanchant({
+                baseColor: style.baseColor,
+                sungColor: style.sungColor,
+                baseAlpha: style.baseAlpha ?? 100,
+                sungAlpha: style.sungAlpha ?? 100,
+              })
+            }
+            title="Take the colours the lyrics already use"
+          >
+            Take from the lyrics
+          </button>
+          <button
+            className={styles.smallBtn}
+            onClick={() =>
+              onStyleChange({
+                baseColor: fanchant.baseColor,
+                sungColor: fanchant.sungColor,
+                baseAlpha: fanchant.baseAlpha,
+                sungAlpha: fanchant.sungAlpha,
+              })
+            }
+            title="Make every line use this look"
+          >
+            Apply to all lyrics
+          </button>
+        </div>
+        <p className={styles.muted}>
+          Save it for good under <em>Default look</em> at the top, and new
+          projects open with it.
+        </p>
+      </section>
+
+      <section className={styles.section}>
+        <h4 className={styles.heading}>
           {words.length > 1 ? 'Selected words' : 'Selected word'}
           {words.length > 0 ? <span className={styles.badge}>{wordLabel}</span> : null}
         </h4>
@@ -713,6 +808,9 @@ export function KaraokeStylePanel({
               </p>
             )}
             <div className={styles.buttonRow}>
+              <button className={styles.primaryBtn} onClick={onFanchantWords}>
+                Fanchant
+              </button>
               <button
                 className={styles.smallBtn}
                 onClick={() =>
@@ -836,7 +934,17 @@ export function KaraokeStylePanel({
                 className={n.id === selectedNoteId ? styles.noteItemActive : styles.noteItem}
                 onClick={() => onSelectNote(n.id)}
               >
-                {n.text || '(empty)'}
+                <span className={styles.noteLabel}>{n.text || '(empty)'}</span>
+                <button
+                  className={styles.noteRemove}
+                  title="Delete this text box"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onNoteDelete(n.id);
+                  }}
+                >
+                  ×
+                </button>
               </li>
             ))}
           </ul>
@@ -899,6 +1007,13 @@ export function KaraokeStylePanel({
             </div>
             <div className={styles.buttonRow}>
               <button
+                className={styles.primaryBtn}
+                onClick={() => onFanchantNote(note.id)}
+                title="Use the project's fanchant colour"
+              >
+                Fanchant
+              </button>
+              <button
                 className={styles.smallBtn}
                 onClick={() =>
                   onNoteChange(note.id, {
@@ -924,6 +1039,38 @@ export function KaraokeStylePanel({
             <p className={styles.muted}>
               With an after colour set, the box fills across its span on the lane — drag its
               block there to set how long it takes.
+            </p>
+
+            <div className={styles.row}>
+              <Field label="Show early (s)">
+                <input
+                  type="number"
+                  className={styles.input}
+                  value={note.leadIn ?? 0}
+                  min={0}
+                  step={0.1}
+                  onChange={(e) =>
+                    onNoteChange(note.id, { leadIn: Math.max(0, Number(e.target.value)) })
+                  }
+                />
+              </Field>
+              <Field label="Hold after (s)">
+                <input
+                  type="number"
+                  className={styles.input}
+                  value={note.holdOut ?? 0}
+                  min={0}
+                  step={0.1}
+                  onChange={(e) =>
+                    onNoteChange(note.id, { holdOut: Math.max(0, Number(e.target.value)) })
+                  }
+                />
+              </Field>
+            </div>
+            <p className={styles.muted}>
+              The box is on screen for this much longer either side, without
+              stretching the fill — so a cue can be read before it is due and
+              left up a moment after.
             </p>
             <div className={styles.row}>
               <Field label="X">

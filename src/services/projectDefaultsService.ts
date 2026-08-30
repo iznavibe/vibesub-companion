@@ -1,4 +1,11 @@
-import { KaraokeStyle, LyricProject, KaraokePanel, FontAsset } from '../types/karaoke';
+import {
+  DEFAULT_FANCHANT,
+  FanchantLook,
+  FontAsset,
+  KaraokePanel,
+  KaraokeStyle,
+  LyricProject,
+} from '../types/karaoke';
 import { isTauri } from './tauriService';
 
 const FILE = 'project-defaults.json';
@@ -15,6 +22,8 @@ export interface ProjectDefaults {
   version: number;
   canvas: { width: number; height: number; fps: number };
   style: KaraokeStyle;
+  /** The colour a project is built around, so a new one opens with it. */
+  fanchant: FanchantLook;
   panel: KaraokePanel;
   romaji: {
     enabled: boolean;
@@ -41,6 +50,7 @@ export function defaultsFromProject(project: LyricProject): ProjectDefaults {
     version: VERSION,
     canvas: { ...project.canvas },
     style: { ...project.style },
+    fanchant: { ...DEFAULT_FANCHANT, ...(project.fanchant ?? {}) },
     panel: { ...project.panel },
     romaji: {
       enabled: !!project.romaji?.enabled,
@@ -100,6 +110,7 @@ export function applyDefaults(project: LyricProject, d: ProjectDefaults): LyricP
     ...project,
     canvas: { ...project.canvas, fps: d.canvas.fps || project.canvas.fps },
     style: { ...scaleStyle(d.style, factor) } as KaraokeStyle,
+    fanchant: { ...DEFAULT_FANCHANT, ...(d.fanchant ?? {}) },
     panel: scaleRect(d.panel, factor),
     romaji: {
       ...project.romaji,

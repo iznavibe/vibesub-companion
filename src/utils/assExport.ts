@@ -1,4 +1,9 @@
-import { KaraokeLine, KaraokeStyle, LyricProject } from '../types/karaoke';
+import {
+  annotationWindow,
+  KaraokeLine,
+  KaraokeStyle,
+  LyricProject,
+} from '../types/karaoke';
 import { lineFontSize } from './karaokeRenderer';
 
 /**
@@ -412,8 +417,11 @@ export function buildAssScript(project: LyricProject, options: AssBuildOptions):
   const noteEvents = (project.annotations ?? [])
     .filter((note) => note.text.trim().length > 0)
     .map((note) => {
-      const appear = note.appearAt ?? 0;
-      const disappear = note.disappearAt ?? duration;
+      // The event covers the whole time the box is up; the sweep covers only
+      // the span it is sung over, with the lead-in held unsung in front of it.
+      const sungFrom = note.appearAt ?? 0;
+      const sungTo = note.disappearAt ?? duration;
+      const { from: appear, to: disappear } = annotationWindow(note, duration);
       const an = note.align === 'center' ? 8 : note.align === 'right' ? 9 : 7;
 
       const baseAlpha = note.alpha ?? 100;
@@ -434,10 +442,12 @@ export function buildAssScript(project: LyricProject, options: AssBuildOptions):
         `\\b${note.bold ? 1 : 0}`,
       ].join('');
 
-      // With a sung colour the box fills across its own window; without one it
-      // just sits there in a single colour.
+      // With a sung colour the box fills across its span; without one it just
+      // sits there in a single colour.
+      const leadCs = Math.max(0, Math.round((sungFrom - appear) * 100));
+      const sweepCs = Math.max(0, Math.round((sungTo - sungFrom) * 100));
       const body = note.sungColor
-        ? `{\\kf${Math.max(0, Math.round((disappear - appear) * 100))}}${escapeAssText(note.text)}`
+        ? `${leadCs > 0 ? `{\\k${leadCs}}${ZWSP}` : ''}{\\kf${sweepCs}}${escapeAssText(note.text)}`
         : escapeAssText(note.text);
 
       return `Dialogue: 1,${toAssTime(appear)},${toAssTime(

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Annotation } from '../types/karaoke';
 import { SyllableRef, TrackLines, moveSelection, setSyllableBoundary } from '../utils/karaokeText';
 import styles from './KaraokeLane.module.css';
@@ -709,9 +709,20 @@ export function KaraokeLane({
               const left = timeToX(from);
               const right = timeToX(to);
               if (right < -40 || left > width + 40) return null;
+              // The extra time the box is on screen either side of its span,
+              // drawn behind it so the difference between "showing" and "being
+              // sung" is visible while dragging.
+              const haloLeft = timeToX(Math.max(0, from - (note.leadIn ?? 0)));
+              const haloRight = timeToX(to + (note.holdOut ?? 0));
               return (
+                <Fragment key={note.id}>
+                {haloRight - haloLeft > right - left && (
+                  <div
+                    className={styles.noteHalo}
+                    style={{ left: haloLeft, width: Math.max(6, haloRight - haloLeft) }}
+                  />
+                )}
                 <div
-                  key={note.id}
                   className={[
                     styles.block,
                     styles.noteBlock,
@@ -724,7 +735,13 @@ export function KaraokeLane({
                   onPointerMove={handlePointerMove}
                   onPointerUp={endDrag}
                   onPointerCancel={endDrag}
-                  title={`${note.text} — ${from.toFixed(2)}s -> ${to.toFixed(2)}s`}
+                  title={
+                    `${note.text} — sung ${from.toFixed(2)}s to ${to.toFixed(2)}s` +
+                    (note.leadIn || note.holdOut
+                      ? `, on screen ${(from - (note.leadIn ?? 0)).toFixed(2)}s to ` +
+                        `${(to + (note.holdOut ?? 0)).toFixed(2)}s`
+                      : '')
+                  }
                 >
                   <span
                     className={styles.handleLeft}
@@ -740,6 +757,7 @@ export function KaraokeLane({
                     onPointerUp={endDrag}
                   />
                 </div>
+                </Fragment>
               );
             })}
           </div>

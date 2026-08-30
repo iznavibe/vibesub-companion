@@ -7,6 +7,7 @@ import {
   LyricProject,
   applyBackgroundVideo,
   createAnnotation,
+  DEFAULT_FANCHANT,
   createEmptyLyricProject,
   migrateLyricProject,
   splitPanelsForTracks,
@@ -439,11 +440,17 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
     };
   }, [current.background.mediaPath, current.background.isVideo]);
 
-  // Mirrored into a ref so the global key handler always sees the live selection.
+  // Mirrored into refs so the global key handler, bound once, always sees the
+  // live values rather than the ones captured when it was attached.
   const selectionRef = useRef<SyllableRef[]>([]);
+  const selectedNoteRef = useRef<string | null>(null);
+  const deleteNoteRef = useRef<(id: string) => void>(() => undefined);
   useEffect(() => {
     selectionRef.current = selection;
   }, [selection]);
+  useEffect(() => {
+    selectedNoteRef.current = selectedNoteId;
+  }, [selectedNoteId]);
 
   const seek = useCallback((t: number) => {
     const el = mediaRef.current;
@@ -480,6 +487,16 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
       if (e.code === 'Space') {
         e.preventDefault();
         togglePlay();
+        return;
+      }
+
+      // Delete removes the selected text box. Words have their own handling on
+      // the lane, so this only steps in when no word is selected.
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectionRef.current.length === 0) {
+        const id = selectedNoteRef.current;
+        if (!id) return;
+        e.preventDefault();
+        deleteNoteRef.current(id);
         return;
       }
 
@@ -965,14 +982,19 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
   };
 
   const handleAddNote = () => {
+    // At the playhead, in the project's own look, with a span short enough to
+    // have handles worth dragging.
     const note = createAnnotation(
       Math.round(current.panel.x + current.panel.width / 2),
       Math.round(Math.max(0, current.panel.y - current.style.lineHeight)),
-      Math.round(current.style.fontSize * 0.8)
+      Math.round(current.style.fontSize * 0.8),
+      currentTime,
+      current.fanchant
     );
     patch({ annotations: [...(current.annotations ?? []), note] });
     setSelectedNoteId(note.id);
     setTab('style');
+    setStatus('Text box added at the playhead — drag its block on the lane to time it');
   };
 
   const handleNoteChange = useCallback(
@@ -989,7 +1011,9 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
   const handleDeleteNote = (id: string) => {
     patch({ annotations: (current.annotations ?? []).filter((n) => n.id !== id) });
     setSelectedNoteId(null);
+    setStatus('Text box deleted — Ctrl+Z brings it back');
   };
+  deleteNoteRef.current = handleDeleteNote;
 
 
   const handleLineChange = useCallback(
@@ -1238,6 +1262,35 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
       handleEditLine(ref.track, ref.line, words.join(''));
     },
     [doc, handleEditLine]
+  );
+
+  const fanchant = current.fanchant ?? DEFAULT_FANCHANT;
+
+  /**
+   * Set the selected words to the project's look.
+   *
+   * One button rather than a list of presets to pick through: a project is
+   * built around a single colour, and this is it.
+   */
+  const handleFanchantWords = useCallback(() => {
+    handleWordsPatch({
+      baseColor: fanchant.baseColor,
+      sungColor: fanchant.sungColor,
+      baseAlpha: fanchant.baseAlpha,
+      sungAlpha: fanchant.sungAlpha,
+    });
+  }, [fanchant, handleWordsPatch]);
+
+  /** The same look on a text box, so a shout cue matches the words it sits by. */
+  const handleFanchantNote = useCallback(
+    (id: string) =>
+      handleNoteChange(id, {
+        color: fanchant.baseColor,
+        sungColor: fanchant.sungColor,
+        alpha: fanchant.baseAlpha,
+        sungAlpha: fanchant.sungAlpha,
+      }),
+    [fanchant, handleNoteChange]
   );
 
   /** Remember this project's look as the starting point for new ones. */
@@ -2191,6 +2244,8 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
               selectedNoteId={selectedNoteId}
               words={selectedWords}
               wordSpan={selectedWordSpan}
+              onFanchantWords={handleFanchantWords}
+              onFanchantNote={handleFanchantNote}
               onWordsPatch={handleWordsPatch}
               onWordsRetime={handleWordsRetime}
               onWordsSpread={handleWordsSpread}

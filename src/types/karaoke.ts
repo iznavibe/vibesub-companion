@@ -145,6 +145,25 @@ export interface KaraokeCanvasSpec {
  * A free-floating text box, for things that are not sung: a shout cue like
  * "(함성!)" over a line, a section label, a note. It has no karaoke sweep.
  */
+/**
+ * The one look a project is built around — pink for a fanchant, something else
+ * for another song. Kept on the project so a word, a line or a text box can all
+ * be set to it with a single button, and carried into new projects as a default.
+ */
+export interface FanchantLook {
+  baseColor: string;
+  sungColor: string;
+  baseAlpha: number;
+  sungAlpha: number;
+}
+
+export const DEFAULT_FANCHANT: FanchantLook = {
+  baseColor: '#FF5FA2',
+  sungColor: '#FFFFFF',
+  baseAlpha: 100,
+  sungAlpha: 100,
+};
+
 export interface Annotation {
   id: string;
   text: string;
@@ -157,9 +176,19 @@ export interface Annotation {
   outlineColor: string;
   outlineWidth: number;
   align: TextAlign;
-  /** Seconds; null means visible for the whole project. */
+  /**
+   * The span the box is *sung* over — what its block on the lane covers, and
+   * what the fill sweeps across. Null means the whole project.
+   */
   appearAt: number | null;
   disappearAt: number | null;
+  /**
+   * Seconds on screen before the sweep starts and after it ends. A shout cue
+   * has to be readable before it is due, and worth leaving up a moment after,
+   * without either stretching the sweep it is timed to.
+   */
+  leadIn?: number;
+  holdOut?: number;
   /**
    * Colour after the sweep has passed. When set, the box fills across its own
    * window the way a lyric line does — a shout cue can then show how long it
@@ -211,6 +240,8 @@ export interface LyricProject {
 
   panel: KaraokePanel;
   style: KaraokeStyle;
+  /** The look words and text boxes are set to with one button. */
+  fanchant: FanchantLook;
   lines: KaraokeLine[];
   annotations: Annotation[];
   fonts: FontAsset[];
@@ -293,6 +324,7 @@ export function createEmptyLyricProject(id: string, name: string): LyricProject 
     duration: 0,
     panel: defaultPanelFor(width, height),
     style: { ...DEFAULT_KARAOKE_STYLE },
+    fanchant: { ...DEFAULT_FANCHANT },
     lines: [],
     annotations: [],
     fonts: [],
@@ -342,6 +374,7 @@ export function migrateLyricProject(project: LyricProject): LyricProject {
     blockLeadIn: project.blockLeadIn ?? 0,
     blockFillGaps: project.blockFillGaps ?? false,
     blockHoldOut: project.blockHoldOut === undefined ? 1.5 : project.blockHoldOut,
+    fanchant: { ...DEFAULT_FANCHANT, ...(project.fanchant ?? {}) },
     romaji: project.romaji ?? {
       enabled: false,
       lines: [],
@@ -362,7 +395,18 @@ export function migrateLyricProject(project: LyricProject): LyricProject {
 }
 
 let annotationCounter = 0;
-export function createAnnotation(x: number, y: number, fontSize: number): Annotation {
+export function createAnnotation(
+  x: number,
+  y: number,
+  fontSize: number,
+  /**
+   * Where the playhead is. A new box lands there with a short span, so it can
+   * be dragged into place on the lane; one spanning the whole song has no
+   * handles worth grabbing and has to be cut down before it can be timed.
+   */
+  at = 0,
+  look?: FanchantLook
+): Annotation {
   annotationCounter += 1;
   return {
     id: `note-${Date.now().toString(36)}-${annotationCounter}`,
@@ -370,13 +414,31 @@ export function createAnnotation(x: number, y: number, fontSize: number): Annota
     x,
     y,
     fontSize,
-    color: '#FFFFFF',
+    color: look?.baseColor ?? '#FFFFFF',
     bold: true,
     outlineColor: '#000000',
     outlineWidth: 3,
     align: 'center',
-    appearAt: null,
-    disappearAt: null,
+    appearAt: Math.max(0, at),
+    disappearAt: Math.max(0, at) + 2,
+    leadIn: 0,
+    holdOut: 0,
+    sungColor: look?.sungColor,
+    alpha: look?.baseAlpha,
+    sungAlpha: look?.sungAlpha,
+  };
+}
+
+/** When a box is on screen, which is wider than the span it is sung over. */
+export function annotationWindow(
+  note: Annotation,
+  duration: number
+): { from: number; to: number } {
+  const from = note.appearAt ?? 0;
+  const to = note.disappearAt ?? duration;
+  return {
+    from: Math.max(0, from - (note.leadIn ?? 0)),
+    to: to + (note.holdOut ?? 0),
   };
 }
 
