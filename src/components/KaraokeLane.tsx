@@ -257,12 +257,11 @@ export function KaraokeLane({
     return e.clientY - rect.top;
   };
 
-  /** Vertical extent of a track's row within the lane. */
+  /** Vertical extent of a track's row within the lane, sub-lanes included. */
   const rowBounds = (track: number) => {
-    const index = visibleTracks.indexOf(track);
-    if (index < 0) return null;
-    const top = WAVE_HEIGHT + index * ROW_HEIGHT;
-    return { top, bottom: top + ROW_HEIGHT };
+    if (!visibleTracks.includes(track)) return null;
+    const top = trackTop(track);
+    return { top, bottom: top + trackHeight(track) };
   };
 
   const selectedSet = useMemo(
@@ -277,9 +276,68 @@ export function KaraokeLane({
     [tracks]
   );
 
+  /**
+   * Which sub-lane each line sits in, per track.
+   *
+   * Lines normally follow one another and all sit in the first, which is what
+   * keeps the lane compact. When two overlap in time — dragged past each other,
+   * or timed that way on purpose — stacking them at the same height leaves one
+   * hidden under the other and neither reliably clickable, so the later one
+   * steps down into a lane of its own.
+   */
+  const laneLayout = useMemo(
+    () =>
+      tracks.map((lines) => {
+        const spans = lines.map((line, index) => {
+          const timed = line.syllables.filter((sy) => sy.end > sy.start);
+          if (timed.length === 0) return null;
+          return {
+            index,
+            start: Math.min(...timed.map((sy) => sy.start)),
+            end: Math.max(...timed.map((sy) => sy.end)),
+          };
+        });
+
+        const lane = new Map<number, number>();
+        const lastEnd: number[] = [];
+        // In sung order, so the packing follows the song rather than the order
+        // the lines happen to be stored in.
+        for (const span of spans
+          .filter((sp): sp is NonNullable<typeof sp> => sp !== null)
+          .sort((a, b) => a.start - b.start)) {
+          let slot = lastEnd.findIndex((end) => end <= span.start + 1e-6);
+          if (slot < 0) slot = lastEnd.length;
+          lastEnd[slot] = span.end;
+          lane.set(span.index, slot);
+        }
+        return { lane, count: Math.max(1, lastEnd.length) };
+      }),
+    [tracks]
+  );
+
+  /** How tall a track's row is, once its sub-lanes are counted. */
+  const trackHeight = useCallback(
+    (track: number) => (laneLayout[track]?.count ?? 1) * ROW_HEIGHT,
+    [laneLayout]
+  );
+
+  const trackTop = useCallback(
+    (track: number) => {
+      let top = WAVE_HEIGHT;
+      for (const other of visibleTracks) {
+        if (other === track) break;
+        top += trackHeight(other);
+      }
+      return top;
+    },
+    [visibleTracks, trackHeight]
+  );
+
+  const lyricRowsHeight = visibleTracks.reduce((total, t) => total + trackHeight(t), 0);
+
   // Text boxes get their own row under the lyric rows, but only once there is
   // one to show.
-  const noteRowTop = WAVE_HEIGHT + visibleTracks.length * ROW_HEIGHT;
+  const noteRowTop = WAVE_HEIGHT + lyricRowsHeight;
   const showNoteRow = notes.length > 0;
 
   // Delete removes the selected blocks. Ignored while typing so it does not
@@ -465,9 +523,16 @@ export function KaraokeLane({
         tracks.forEach((lines, track) => {
           const bounds = rowBounds(track);
           if (!bounds) return;
-          const coversRow = marquee.bottom >= bounds.top && marquee.top <= bounds.bottom;
-          if (!coversRow) return;
+          if (marquee.bottom < bounds.top || marquee.top > bounds.bottom) return;
+
           lines.forEach((l, lineIndex) => {
+            // Down to the sub-lane, not just the track: two lines stacked
+            // because they overlap can be rubber-banded apart, which is the
+            // whole reason for stacking them.
+            const lane = laneLayout[track]?.lane.get(lineIndex) ?? 0;
+            const laneTop = bounds.top + lane * ROW_HEIGHT;
+            if (marquee.bottom < laneTop || marquee.top > laneTop + ROW_HEIGHT) return;
+
             l.syllables.forEach((syl, i) => {
               if (syl.end > marquee.from && syl.start < marquee.to) {
                 picked.push({ track, line: lineIndex, syllable: i });
@@ -580,7 +645,7 @@ export function KaraokeLane({
         className={styles.track}
         ref={trackRef}
         style={{
-          height: WAVE_HEIGHT + visibleTracks.length * ROW_HEIGHT + (showNoteRow ? ROW_HEIGHT : 0),
+          height: WAVE_HEIGHT + lyricRowsHeight + (showNoteRow ? ROW_HEIGHT : 0),
         }}
         onPointerDown={handleTrackPointerDown}
         onPointerMove={handlePointerMove}
@@ -593,7 +658,7 @@ export function KaraokeLane({
           <div
             key={track}
             className={styles.row}
-            style={{ top: WAVE_HEIGHT + visibleTracks.indexOf(track) * ROW_HEIGHT, height: ROW_HEIGHT }}
+            style={{ top: trackTop(track), height: trackHeight(track) }}
           >
             {visibleTracks.length > 1 && (
               <span className={styles.rowLabel}>{trackLabels[track] ?? `Track ${track + 1}`}</span>
@@ -609,6 +674,7 @@ export function KaraokeLane({
                 const picked = selectedSet.has(key);
                 const colour = LINE_COLORS[lineIndex % LINE_COLORS.length];
                 const current = track === selectedTrack && lineIndex === selectedLine;
+                const lane = laneLayout[track]?.lane.get(lineIndex) ?? 0;
                 return (
                   <div
                     key={`${l.id}-${i}`}
@@ -624,6 +690,8 @@ export function KaraokeLane({
                     style={{
                       left,
                       width: Math.max(2, right - left),
+                      top: lane * ROW_HEIGHT + 5,
+                      height: ROW_HEIGHT - 10,
                       borderColor: colour,
                       background: picked ? undefined : `${colour}33`,
                     }}

@@ -90,6 +90,11 @@
   pointer-events: none;
 }
 
+/*
+ * Lyric blocks set their own top and height inline, to sit in their sub-lane;
+ * `bottom` is then over-constrained and ignored, and only text boxes — which
+ * set neither — actually use it.
+ */
 .block {
   position: absolute;
   top: 5px;

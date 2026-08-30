@@ -1084,12 +1084,25 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
   deleteNoteRef.current = handleDeleteNote;
 
 
+  /**
+   * Replace one line, on whichever track it belongs to.
+   *
+   * The track is not optional. Writing to the main lyrics by default meant
+   * every line-level tool — splitting a word, closing gaps, nudging by 50ms —
+   * quietly edited the Korean line at the same index while the romaji line was
+   * the one selected.
+   */
   const handleLineChange = useCallback(
-    (index: number, next: KaraokeLine, transient = false) => {
-      const lines = [...doc.value.lines];
+    (track: number, index: number, next: KaraokeLine, transient = false) => {
+      const source = track === 1 ? doc.value.romaji?.lines ?? [] : doc.value.lines;
+      const lines = [...source];
       lines[index] = next;
-      if (transient) patchTransient({ lines });
-      else patch({ lines });
+      const value: Partial<LyricProject> =
+        track === 1
+          ? { romaji: { ...doc.value.romaji, lines } }
+          : { lines };
+      if (transient) patchTransient(value);
+      else patch(value);
     },
     [doc, patch, patchTransient]
   );
@@ -1561,9 +1574,10 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
 
   const withSelectedLine = (fn: (line: KaraokeLine) => KaraokeLine) => {
     if (selectedLine === null) return;
-    const line = current.lines[selectedLine];
+    const lines = selectedTrack === 1 ? current.romaji?.lines ?? [] : current.lines;
+    const line = lines[selectedLine];
     if (!line) return;
-    handleLineChange(selectedLine, fn(line));
+    handleLineChange(selectedTrack, selectedLine, fn(line));
   };
 
   const handleSpread = () =>
@@ -2374,8 +2388,10 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
               }}
               onProjectChange={(p) => patch(p, { coalesce: true })}
               onLineChange={(index, p) => {
-                const line = current.lines[index];
-                if (line) handleLineChange(index, { ...line, ...p });
+                const source =
+                  selectedTrack === 1 ? current.romaji?.lines ?? [] : current.lines;
+                const target = source[index];
+                if (target) handleLineChange(selectedTrack, index, { ...target, ...p });
               }}
               selectedNoteId={selectedNoteId}
               words={selectedWords}
