@@ -344,7 +344,10 @@ export function KaraokeCanvas({
     boxWidth: number,
     boxHeight: number,
     disabled: boolean,
-    track: number
+    track: number,
+    /** A text box is placed by its anchor point, not by a corner. */
+    kind: 'panel' | 'note' = 'panel',
+    ignoreNoteId?: string
   ) => {
     const next: Guides = { vertical: null, horizontal: null };
     if (disabled) {
@@ -365,6 +368,25 @@ export function KaraokeCanvas({
       { at: spec.height / 2 - boxHeight / 2, guide: spec.height / 2 },
     ];
 
+    // A shout cue is usually placed against the lyrics, so both lyric blocks
+    // and the other text boxes are alignment targets in their own right.
+    if (kind === 'note') {
+      for (const t of [0, 1]) {
+        if ((trackLines(project)[t]?.length ?? 0) === 0 && t === 1) continue;
+        const tp = trackPanel(project, t);
+        xTargets.push({ at: tp.x, guide: tp.x });
+        xTargets.push({ at: tp.x + tp.width / 2, guide: tp.x + tp.width / 2 });
+        xTargets.push({ at: tp.x + tp.width, guide: tp.x + tp.width });
+        yTargets.push({ at: tp.y, guide: tp.y });
+        yTargets.push({ at: tp.y + tp.height, guide: tp.y + tp.height });
+      }
+      for (const other of project.annotations ?? []) {
+        if (other.id === ignoreNoteId) continue;
+        xTargets.push({ at: other.x, guide: other.x });
+        yTargets.push({ at: other.y, guide: other.y });
+      }
+    }
+
     // With the grid up, its lines are snap targets too — both for the box's
     // leading edge and for its centre, which is what "align to the grid" means
     // in practice.
@@ -383,7 +405,9 @@ export function KaraokeCanvas({
 
     const other = trackPanel(project, track === 0 ? 1 : 0);
     const otherInUse =
-      (trackLines(project)[track === 0 ? 1 : 0]?.length ?? 0) > 0 && other !== undefined;
+      kind === 'panel' &&
+      (trackLines(project)[track === 0 ? 1 : 0]?.length ?? 0) > 0 &&
+      other !== undefined;
     if (otherInUse) {
       xTargets.push({ at: other.x, guide: other.x });
       xTargets.push({ at: other.x + other.width - boxWidth, guide: other.x + other.width });
@@ -449,7 +473,16 @@ export function KaraokeCanvas({
       }
       case 'note-move': {
         // A note is positioned by its anchor point, so it snaps on that point.
-        const snapped = snapToCentre(x, y, 0, 0, e.altKey, drag.track);
+        const snapped = snapToCentre(
+          x,
+          y,
+          0,
+          0,
+          e.altKey,
+          drag.track,
+          'note',
+          drag.target.id
+        );
         onNoteChange(drag.target.id, { x: Math.round(snapped.x), y: Math.round(snapped.y) });
         return;
       }

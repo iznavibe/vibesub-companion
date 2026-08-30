@@ -70,14 +70,25 @@ export function KaraokeLane({
   const trackRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(800);
   const [view, setView] = useState<{ start: number; end: number }>({ start: 0, end: 0 });
-  const [marquee, setMarquee] = useState<{ from: number; to: number } | null>(null);
+  const [marquee, setMarquee] = useState<{
+    from: number;
+    to: number;
+    top: number;
+    bottom: number;
+  } | null>(null);
   // The block being renamed in place, and its draft text.
   const [editing, setEditing] = useState<{ key: string; text: string } | null>(null);
 
   const dragRef = useRef<
     | { kind: 'edge'; track: number; line: number; index: number; edge: 'start' | 'end' }
     | { kind: 'move'; grabTime: number; moved: boolean }
-    | { kind: 'marquee'; anchor: number; additive: boolean; moved: boolean }
+    | {
+        kind: 'marquee';
+        anchor: number;
+        anchorY: number;
+        additive: boolean;
+        moved: boolean;
+      }
     | null
   >(null);
   // The lines as they were when the drag began, so each move re-derives from a
@@ -225,6 +236,20 @@ export function KaraokeLane({
     return Math.max(0, Math.min(duration || Infinity, xToTime(e.clientX - rect.left)));
   };
 
+  /** Pointer position measured down from the top of the track. */
+  const pointerY = (e: React.PointerEvent) => {
+    const rect = trackRef.current!.getBoundingClientRect();
+    return e.clientY - rect.top;
+  };
+
+  /** Vertical extent of a track's row within the lane. */
+  const rowBounds = (track: number) => {
+    const index = visibleTracks.indexOf(track);
+    if (index < 0) return null;
+    const top = WAVE_HEIGHT + index * ROW_HEIGHT;
+    return { top, bottom: top + ROW_HEIGHT };
+  };
+
   const selectedSet = useMemo(
     () => new Set(selection.map((r) => refKey(r.track, r.line, r.syllable))),
     [selection]
@@ -320,13 +345,15 @@ export function KaraokeLane({
   const handleTrackPointerDown = (e: React.PointerEvent) => {
     if (dragRef.current) return;
     const t = pointerTime(e);
+    const y = pointerY(e);
     dragRef.current = {
       kind: 'marquee',
       anchor: t,
+      anchorY: y,
       additive: e.ctrlKey || e.metaKey || e.shiftKey,
       moved: false,
     };
-    setMarquee({ from: t, to: t });
+    setMarquee({ from: t, to: t, top: y, bottom: y });
     (e.currentTarget as Element).setPointerCapture(e.pointerId);
   };
 
@@ -337,7 +364,13 @@ export function KaraokeLane({
 
     if (drag.kind === 'marquee') {
       drag.moved = true;
-      setMarquee({ from: Math.min(drag.anchor, t), to: Math.max(drag.anchor, t) });
+      const y = pointerY(e);
+      setMarquee({
+        from: Math.min(drag.anchor, t),
+        to: Math.max(drag.anchor, t),
+        top: Math.min(drag.anchorY, y),
+        bottom: Math.max(drag.anchorY, y),
+      });
       return;
     }
 
@@ -372,8 +405,14 @@ export function KaraokeLane({
         onSeek(drag.anchor);
         if (!drag.additive) onSelectionChange([]);
       } else if (marquee) {
+        // Only rows the rubber band actually covers. Dragging inside the
+        // lyrics row must not sweep up the romaji beneath it.
         const picked: SyllableRef[] = [];
         tracks.forEach((lines, track) => {
+          const bounds = rowBounds(track);
+          if (!bounds) return;
+          const coversRow = marquee.bottom >= bounds.top && marquee.top <= bounds.bottom;
+          if (!coversRow) return;
           lines.forEach((l, lineIndex) => {
             l.syllables.forEach((syl, i) => {
               if (syl.end > marquee.from && syl.start < marquee.to) {
@@ -602,6 +641,8 @@ export function KaraokeLane({
             style={{
               left: timeToX(marquee.from),
               width: Math.max(1, timeToX(marquee.to) - timeToX(marquee.from)),
+              top: Math.max(0, Math.min(marquee.top, marquee.bottom)),
+              height: Math.max(2, Math.abs(marquee.bottom - marquee.top)),
             }}
           />
         )}

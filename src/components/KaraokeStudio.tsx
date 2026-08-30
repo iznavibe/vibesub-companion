@@ -55,6 +55,13 @@ import {
   rescaleLyricSet,
   saveLyricSetToFile,
 } from '../services/lyricSetService';
+import {
+  ColorPreset,
+  loadColorPresets,
+  presetFromStyle,
+  presetToStyle,
+  saveColorPresets,
+} from '../services/colorPresetService';
 import { isTauri } from '../services/tauriService';
 import styles from './KaraokeStudio.module.css';
 
@@ -189,6 +196,9 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
   const [isRendering, setIsRendering] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Colour presets live outside the project, so they carry between them.
+  const [presets, setPresets] = useState<ColorPreset[]>([]);
+  const [defaultPresetId, setDefaultPresetId] = useState<string | null>(null);
 
   const { data: waveform } = useAudioWaveform(current.audio?.path ?? null);
 
@@ -226,6 +236,25 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
   useEffect(() => {
     checkFfmpeg().then(setFfmpeg).catch(() => setFfmpeg(null));
   }, []);
+
+  useEffect(() => {
+    loadColorPresets()
+      .then((store) => {
+        setPresets(store.presets);
+        setDefaultPresetId(store.defaultId);
+
+        // A brand new project adopts the default preset. An existing one is
+        // left alone: its colours are a decision already made.
+        const preset = store.presets.find((p) => p.id === store.defaultId);
+        if (preset && doc.value.lines.length === 0 && !doc.value.background.mediaPath) {
+          doc.setTransient({
+            ...doc.value,
+            style: { ...doc.value.style, ...presetToStyle(preset) },
+          });
+        }
+      })
+      .catch(() => undefined);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Lead-in and gap filling change every block's window, so reapply them when
   // either setting moves.
@@ -1015,6 +1044,91 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
     [doc, setTracks]
   );
 
+  const persistPresets = useCallback(
+    (next: ColorPreset[], nextDefault: string | null) => {
+      setPresets(next);
+      setDefaultPresetId(nextDefault);
+      saveColorPresets({ version: 1, presets: next, defaultId: nextDefault }).catch((e) =>
+        setError(`Could not save colour presets: ${e instanceof Error ? e.message : e}`)
+      );
+    },
+    []
+  );
+
+  /** Store the colours currently in use under a name. */
+  const handleSavePreset = useCallback(
+    (name: string, makeDefault: boolean) => {
+      const style =
+        selectedTrack === 1
+          ? { ...current.style, ...(current.romaji?.style ?? {}) }
+          : current.style;
+      const preset = presetFromStyle(name, style);
+      persistPresets(
+        [...presets, preset],
+        makeDefault ? preset.id : defaultPresetId
+      );
+      setStatus(`Saved colour preset "${preset.name}"`);
+    },
+    [current, selectedTrack, presets, defaultPresetId, persistPresets]
+  );
+
+  const handleDeletePreset = useCallback(
+    (id: string) => {
+      persistPresets(
+        presets.filter((p) => p.id !== id),
+        defaultPresetId === id ? null : defaultPresetId
+      );
+    },
+    [presets, defaultPresetId, persistPresets]
+  );
+
+  const handleSetDefaultPreset = useCallback(
+    (id: string | null) => persistPresets(presets, id),
+    [presets, persistPresets]
+  );
+
+  /** Apply a preset to the whole selected row. */
+  const handleApplyPreset = useCallback(
+    (preset: ColorPreset) => {
+      const bits = presetToStyle(preset);
+      if (selectedTrack === 1) {
+        patch({ romaji: { ...current.romaji, style: { ...current.romaji.style, ...bits } } });
+      } else {
+        patch({ style: { ...current.style, ...bits } });
+      }
+      setStatus(`Applied "${preset.name}"`);
+    },
+    [current, selectedTrack, patch]
+  );
+
+  /** Apply a preset to just the selected word, for one-off emphasis. */
+  const handleApplyPresetToWord = useCallback(
+    (preset: ColorPreset) => {
+      if (selectedLine === null || selectedSyllable === null) return;
+      const lines = selectedTrack === 1 ? current.romaji?.lines ?? [] : current.lines;
+      const line = lines[selectedLine];
+      if (!line) return;
+      const syllables = line.syllables.map((sy, i) =>
+        i === selectedSyllable
+          ? {
+              ...sy,
+              baseColor: preset.baseColor,
+              sungColor: preset.sungColor,
+              baseAlpha: preset.baseAlpha,
+              sungAlpha: preset.sungAlpha,
+            }
+          : sy
+      );
+      const next = lines.map((l, i) => (i === selectedLine ? { ...l, syllables } : l));
+      setTracks(
+        selectedTrack === 1
+          ? [current.lines, next]
+          : [next, current.romaji?.lines ?? []]
+      );
+    },
+    [current, selectedTrack, selectedLine, selectedSyllable, setTracks]
+  );
+
   /**
    * Rename one word from its block on the lane.
    *
@@ -1778,6 +1892,13 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
               selectedNoteId={selectedNoteId}
               onSyllableStrike={handleToggleStrike}
               onSyllableAlpha={handleSyllableAlpha}
+              presets={presets}
+              defaultPresetId={defaultPresetId}
+              onApplyPreset={handleApplyPreset}
+              onApplyPresetToWord={handleApplyPresetToWord}
+              onSavePreset={handleSavePreset}
+              onDeletePreset={handleDeletePreset}
+              onSetDefaultPreset={handleSetDefaultPreset}
               onNoteChange={(id, p) => handleNoteChange(id, p)}
               onNoteDelete={handleDeleteNote}
               onSelectNote={setSelectedNoteId}

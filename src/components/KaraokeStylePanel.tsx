@@ -7,6 +7,8 @@ import {
   LyricProject,
   TextAlign,
 } from '../types/karaoke';
+import { useState } from 'react';
+import type { ColorPreset } from '../services/colorPresetService';
 import styles from './KaraokeStylePanel.module.css';
 
 interface KaraokeStylePanelProps {
@@ -26,6 +28,13 @@ interface KaraokeStylePanelProps {
   onSyllableColor: (base: string | undefined, sung: string | undefined) => void;
   onSyllableStrike: () => void;
   onSyllableAlpha: (base: number | undefined, sung: number | undefined) => void;
+  presets: ColorPreset[];
+  defaultPresetId: string | null;
+  onApplyPreset: (preset: ColorPreset) => void;
+  onApplyPresetToWord: (preset: ColorPreset) => void;
+  onSavePreset: (name: string, makeDefault: boolean) => void;
+  onDeletePreset: (id: string) => void;
+  onSetDefaultPreset: (id: string | null) => void;
   onNoteChange: (id: string, patch: Partial<Annotation>) => void;
   onNoteDelete: (id: string) => void;
   onSelectNote: (id: string | null) => void;
@@ -93,6 +102,13 @@ export function KaraokeStylePanel({
   onSyllableColor,
   onSyllableStrike,
   onSyllableAlpha,
+  presets,
+  defaultPresetId,
+  onApplyPreset,
+  onApplyPresetToWord,
+  onSavePreset,
+  onDeletePreset,
+  onSetDefaultPreset,
   onNoteChange,
   onNoteDelete,
   onSelectNote,
@@ -116,6 +132,8 @@ export function KaraokeStylePanel({
   const notes = project.annotations ?? [];
   const note = notes.find((n) => n.id === selectedNoteId) ?? null;
   const loadedFamilies = (project.fonts ?? []).map((f) => f.family);
+  const [presetName, setPresetName] = useState('');
+  const [presetAsDefault, setPresetAsDefault] = useState(false);
 
   // Line height is stored in pixels, but people think in multiples of the type
   // size, so the control works in multiples and converts.
@@ -332,6 +350,100 @@ export function KaraokeStylePanel({
             Reset scale
           </button>
         </div>
+      </section>
+
+      <section className={styles.section}>
+        <h4 className={styles.heading}>Colour presets</h4>
+        {presets.length === 0 ? (
+          <p className={styles.muted}>Save the colours below to reuse them in other projects.</p>
+        ) : (
+          <ul className={styles.presetList}>
+            {presets.map((preset) => (
+              <li key={preset.id} className={styles.presetItem}>
+                <button
+                  className={styles.presetSwatch}
+                  onClick={() => onApplyPreset(preset)}
+                  title={`Apply "${preset.name}" to this row`}
+                >
+                  <span
+                    className={styles.swatchHalf}
+                    style={{ background: preset.baseColor, opacity: preset.baseAlpha / 100 }}
+                  />
+                  <span
+                    className={styles.swatchHalf}
+                    style={{ background: preset.sungColor, opacity: preset.sungAlpha / 100 }}
+                  />
+                </button>
+                <span className={styles.presetName} title={preset.name}>
+                  {preset.name}
+                  {preset.id === defaultPresetId && (
+                    <span className={styles.presetDefault}> · default</span>
+                  )}
+                </span>
+                <button
+                  className={styles.presetAction}
+                  onClick={() => onApplyPresetToWord(preset)}
+                  disabled={!syllable}
+                  title="Apply to just the selected word"
+                >
+                  word
+                </button>
+                <button
+                  className={styles.presetAction}
+                  onClick={() =>
+                    onSetDefaultPreset(preset.id === defaultPresetId ? null : preset.id)
+                  }
+                  title={
+                    preset.id === defaultPresetId
+                      ? 'Stop using this for new projects'
+                      : 'Use this for new projects'
+                  }
+                >
+                  {preset.id === defaultPresetId ? '★' : '☆'}
+                </button>
+                <button
+                  className={styles.presetAction}
+                  onClick={() => onDeletePreset(preset.id)}
+                  title="Delete this preset"
+                >
+                  ×
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className={styles.buttonRow}>
+          <input
+            className={styles.input}
+            placeholder="Name these colours…"
+            value={presetName}
+            onChange={(e) => setPresetName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && presetName.trim()) {
+                onSavePreset(presetName, presetAsDefault);
+                setPresetName('');
+              }
+            }}
+          />
+          <button
+            className={styles.smallBtn}
+            disabled={!presetName.trim()}
+            onClick={() => {
+              onSavePreset(presetName, presetAsDefault);
+              setPresetName('');
+            }}
+          >
+            Save
+          </button>
+        </div>
+        <label className={styles.check}>
+          <input
+            type="checkbox"
+            checked={presetAsDefault}
+            onChange={(e) => setPresetAsDefault(e.target.checked)}
+          />
+          Make it the default for new projects
+        </label>
       </section>
 
       <section className={styles.section}>
@@ -671,31 +783,49 @@ export function KaraokeStylePanel({
                 className={active ? styles.smallBtnActive : styles.smallBtn}
                 title={`Render at ${w}x${h}. Text and layout scale with the canvas.`}
                 onClick={() => {
-                  // Scale everything that is expressed in canvas pixels, so the
-                  // composition is preserved rather than shrinking into a corner.
+                  // Scale everything expressed in canvas pixels, so the whole
+                  // composition survives the change of resolution instead of
+                  // shrinking into a corner. Both lyric rows must be scaled:
+                  // missing one leaves it stranded at the old size.
                   const factor = w / Math.max(1, canvas.width);
                   if (factor === 1) return;
+
+                  const scaleRect = <T extends { x: number; y: number; width: number; height: number }>(
+                    r: T
+                  ): T => ({
+                    ...r,
+                    x: Math.round(r.x * factor),
+                    y: Math.round(r.y * factor),
+                    width: Math.round(r.width * factor),
+                    height: Math.round(r.height * factor),
+                  });
+                  // Only the fields that are in pixels; colours and modes are
+                  // resolution independent and must be left alone.
+                  const scaleStyle = <T extends Partial<KaraokeStyle>>(st: T): T => ({
+                    ...st,
+                    ...(st.fontSize !== undefined
+                      ? { fontSize: Math.max(6, Math.round(st.fontSize * factor)) }
+                      : {}),
+                    ...(st.lineHeight !== undefined
+                      ? { lineHeight: Math.max(6, Math.round(st.lineHeight * factor)) }
+                      : {}),
+                    ...(st.outlineWidth !== undefined
+                      ? { outlineWidth: Math.round(st.outlineWidth * factor * 10) / 10 }
+                      : {}),
+                    ...(st.shadowOffset !== undefined
+                      ? { shadowOffset: Math.round(st.shadowOffset * factor * 10) / 10 }
+                      : {}),
+                  });
+
                   onProjectChange({
                     canvas: { ...canvas, width: w, height: h },
-                    background: {
-                      ...background,
-                      x: Math.round(background.x * factor),
-                      y: Math.round(background.y * factor),
-                      width: Math.round(background.width * factor),
-                      height: Math.round(background.height * factor),
-                    },
-                    panel: {
-                      x: Math.round(panel.x * factor),
-                      y: Math.round(panel.y * factor),
-                      width: Math.round(panel.width * factor),
-                      height: Math.round(panel.height * factor),
-                    },
-                    style: {
-                      ...style,
-                      fontSize: Math.max(6, Math.round(style.fontSize * factor)),
-                      lineHeight: Math.max(6, Math.round(style.lineHeight * factor)),
-                      outlineWidth: Math.round(style.outlineWidth * factor * 10) / 10,
-                      shadowOffset: Math.round(style.shadowOffset * factor * 10) / 10,
+                    background: scaleRect(background),
+                    panel: scaleRect(project.panel),
+                    style: scaleStyle(project.style),
+                    romaji: {
+                      ...project.romaji,
+                      panel: scaleRect(project.romaji.panel),
+                      style: scaleStyle(project.romaji.style),
                     },
                   });
                 }}
