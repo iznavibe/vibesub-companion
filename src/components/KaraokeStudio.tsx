@@ -12,6 +12,7 @@ import {
   migrateLyricProject,
   splitPanelsForTracks,
 } from '../types/karaoke';
+import { hasHangul, romanizeLines } from '../utils/romanize';
 import { loadFontFromPath, loadProjectFonts } from '../services/fontService';
 import { PanelTransform } from './KaraokeCanvas';
 import {
@@ -801,6 +802,63 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
    * to adjust rather than time from scratch, which is the point of doing the
    * original first.
    */
+  /**
+   * Build the romaji row from the Korean one, transliterating it.
+   *
+   * A Korean line is already cut into syllables and timed, and a romaji
+   * syllable is the same syllable said another way — so the whole row can be
+   * derived rather than written out and matched back on. Every timing and
+   * per-word setting comes across untouched; what is left is spelling.
+   */
+  const handleRomanizeFromKorean = () => {
+    const source = current.lines.filter((l) => l.syllables.length > 0);
+    if (source.length === 0) {
+      setError('There are no Korean lyrics to transliterate yet.');
+      return;
+    }
+    if (!source.some(hasHangul)) {
+      setError('These lyrics have no Hangul in them, so there is nothing to romanize.');
+      return;
+    }
+
+    const existing = current.romaji?.lines ?? [];
+    const timed = existing.filter((l) => l.syllables.some((sy) => sy.end > sy.start));
+    if (
+      timed.length > 0 &&
+      !window.confirm(
+        `This replaces the ${timed.length} romaji line${timed.length === 1 ? '' : 's'} you ` +
+          'already have. Ctrl+Z brings them back.'
+      )
+    ) {
+      return;
+    }
+
+    const lines = romanizeLines(current.lines);
+    const panels = splitPanelsForTracks(current.canvas.width, current.canvas.height);
+    const wasEnabled = current.romaji?.enabled;
+
+    patch({
+      romaji: {
+        ...current.romaji,
+        enabled: true,
+        lines,
+        // First time in, stack the two rows so they do not overlap; after that
+        // keep wherever they have been put.
+        panel: wasEnabled ? current.romaji.panel : panels.romaji,
+        style: current.romaji?.style ?? {},
+      },
+      ...(wasEnabled ? {} : { panel: panels.main }),
+    });
+    setRomajiText(lines.map(lineText).join('\n'));
+    setSelectedTrack(1);
+    setSelectedLine(lines.length > 0 ? 0 : null);
+    setSelection([]);
+    setStatus(
+      `Romanized ${lines.length} lines from the Korean — same timings, same look. ` +
+        'Edit any word on the lane or in the box above to fix the spelling.'
+    );
+  };
+
   const handleApplyRomaji = () => {
     const existing = current.romaji?.lines ?? [];
     const { lines: parsed } = parseLyricBlockDetailed(romajiText, existing, 'romaji');
@@ -2017,6 +2075,15 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
                       onChange={(e) => setRomajiText(e.target.value)}
                     />
                     <div className={styles.buttonRow}>
+                      <button
+                        className={styles.toolBtnPrimary}
+                        onClick={handleRomanizeFromKorean}
+                        title="Transliterate the Korean row, keeping its timings and look"
+                      >
+                        Romanize the Korean
+                      </button>
+                    </div>
+                    <div className={styles.buttonRow}>
                       <button className={styles.toolBtn} onClick={handleApplyRomaji}>
                         Apply romaji
                       </button>
@@ -2031,8 +2098,9 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
                       </button>
                     </div>
                     <p className={styles.hint}>
-                      Line 1 here pairs with line 1 above and inherits its timing, so you only
-                      need to adjust rather than re-time.
+                      “Romanize the Korean” writes this row from the one above, syllable for
+                      syllable, so nothing has to be timed again. Or type your own: line 1 here
+                      pairs with line 1 above and inherits its timing.
                     </p>
                   </>
                 )}

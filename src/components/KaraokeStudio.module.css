@@ -480,6 +480,26 @@
   border-color: #5aaaff;
 }
 
+/* The button that does the work in its row, when there is an obvious one. */
+.toolBtnPrimary {
+  background: rgba(120, 190, 255, 0.16);
+  border: 1px solid rgba(120, 190, 255, 0.5);
+  color: #cfe6ff;
+  border-radius: 5px;
+  padding: 6px 11px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  max-width: 210px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.toolBtnPrimary:hover {
+  background: rgba(120, 190, 255, 0.28);
+}
+
 .toolBtnActive {
   background: #2f6fd0;
   border: 1px solid #3d82ea;
