@@ -17,6 +17,9 @@ import {
   applyBlockWindows,
   closeGaps,
   deleteSelection,
+  editLineText,
+  mergeLineWithNext,
+  splitLineAt,
   distributeEvenly,
   lineText,
   mergeSyllable,
@@ -64,6 +67,59 @@ interface KaraokeStudioProps {
 type Tab = 'lyrics' | 'style';
 
 const VIDEO_EXTENSIONS = ['mp4', 'mov', 'mkv', 'webm', 'avi', 'm4v'];
+
+/**
+ * One editable lyric line.
+ *
+ * The text is held locally while focused and only committed on blur or Enter,
+ * so re-segmenting mid-keystroke cannot move the caret out from under you.
+ * Escape abandons the edit.
+ */
+function LineTextField({
+  value,
+  onCommit,
+  onFocus,
+}: {
+  value: string;
+  onCommit: (text: string) => void;
+  onFocus: () => void;
+}) {
+  const [draft, setDraft] = useState(value);
+  const [editing, setEditing] = useState(false);
+
+  useEffect(() => {
+    if (!editing) setDraft(value);
+  }, [value, editing]);
+
+  return (
+    <input
+      className={styles.lineInput}
+      value={editing ? draft : value}
+      spellCheck={false}
+      onFocus={() => {
+        setDraft(value);
+        setEditing(true);
+        onFocus();
+      }}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => {
+        setEditing(false);
+        if (draft.trim() !== value) onCommit(draft);
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          (e.target as HTMLInputElement).blur();
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          setDraft(value);
+          setEditing(false);
+          (e.target as HTMLInputElement).blur();
+        }
+      }}
+    />
+  );
+}
 
 /**
  * Migrate a project and repair its visibility windows in one step.
@@ -931,6 +987,62 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
     setSelectedLine(next[selectedTrack]?.length ? Math.min(selectedLine ?? 0, next[selectedTrack].length - 1) : null);
   }, [selection, doc, setTracks, selectedTrack, selectedLine]);
 
+  /**
+   * Rewrite one line's words, keeping the timings already set.
+   *
+   * Which track the line belongs to matters: romaji is segmented per mora
+   * whatever the project's Latin setting says.
+   */
+  const handleEditLine = useCallback(
+    (track: number, index: number, text: string) => {
+      const lines = track === 1 ? doc.value.romaji?.lines ?? [] : doc.value.lines;
+      const line = lines[index];
+      if (!line || lineText(line) === text.trim()) return;
+
+      const edited = editLineText(
+        line,
+        text,
+        track === 1 ? 'romaji' : doc.value.latinMode ?? 'word'
+      );
+      const next = lines.map((l, i) => (i === index ? edited : l));
+      const cleaned = next.filter((l) => l.syllables.length > 0);
+      setTracks(
+        track === 1
+          ? [doc.value.lines, cleaned]
+          : [cleaned, doc.value.romaji?.lines ?? []]
+      );
+    },
+    [doc, setTracks]
+  );
+
+  /** Break the selected line in two at the selected word. */
+  const handleSplitLine = useCallback(() => {
+    if (selectedLine === null || selectedSyllable === null) return;
+    const lines = selectedTrack === 1 ? doc.value.romaji?.lines ?? [] : doc.value.lines;
+    const next = splitLineAt(lines, selectedLine, selectedSyllable);
+    if (next === lines) return;
+    setTracks(
+      selectedTrack === 1
+        ? [doc.value.lines, next]
+        : [next, doc.value.romaji?.lines ?? []]
+    );
+    setSelection([]);
+  }, [selectedLine, selectedSyllable, selectedTrack, doc, setTracks]);
+
+  /** Pull the following line up onto this one. */
+  const handleMergeLine = useCallback(() => {
+    if (selectedLine === null) return;
+    const lines = selectedTrack === 1 ? doc.value.romaji?.lines ?? [] : doc.value.lines;
+    const next = mergeLineWithNext(lines, selectedLine);
+    if (next === lines) return;
+    setTracks(
+      selectedTrack === 1
+        ? [doc.value.lines, next]
+        : [next, doc.value.romaji?.lines ?? []]
+    );
+    setSelection([]);
+  }, [selectedLine, selectedTrack, doc, setTracks]);
+
   const handleSyllableColor = (base: string | undefined, sung: string | undefined) => {
     if (selectedLine === null || selectedSyllable === null) return;
     const line = current.lines[selectedLine];
@@ -1544,8 +1656,34 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
                 lane, and hold Space to time each one.
               </p>
 
+              <div className={styles.lineListHead}>
+                <span>{selectedTrack === 1 ? 'Romaji lines' : 'Lyric lines'}</span>
+                <span className={styles.lineListHint}>edit the text to change the words</span>
+              </div>
+              <div className={styles.buttonRow}>
+                <button
+                  className={styles.toolBtn}
+                  onClick={handleSplitLine}
+                  disabled={selectedSyllable === null}
+                  title="Break this line in two before the selected word"
+                >
+                  Split line here
+                </button>
+                <button
+                  className={styles.toolBtn}
+                  onClick={handleMergeLine}
+                  disabled={selectedLine === null}
+                  title="Pull the line below up onto this one"
+                >
+                  Join with next
+                </button>
+              </div>
+
               <ul className={styles.lineList}>
-                {displayProject.lines.map((line, i) => {
+                {(selectedTrack === 1
+                  ? displayProject.romaji?.lines ?? []
+                  : displayProject.lines
+                ).map((line, i) => {
                   const timed = line.syllables.some((s) => s.end > s.start);
                   return (
                     <li
@@ -1559,7 +1697,14 @@ export function KaraokeStudio({ project, onProjectChange, onBack }: KaraokeStudi
                       }}
                     >
                       <span className={timed ? styles.dotTimed : styles.dot} />
-                      <span className={styles.lineLabel}>{lineText(line)}</span>
+                      <LineTextField
+                        value={lineText(line)}
+                        onCommit={(text) => handleEditLine(selectedTrack, i, text)}
+                        onFocus={() => {
+                          setSelectedLine(i);
+                          setSelection([]);
+                        }}
+                      />
                     </li>
                   );
                 })}

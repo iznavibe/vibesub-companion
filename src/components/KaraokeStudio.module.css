@@ -473,3 +473,45 @@
   font-weight: 600;
   cursor: pointer;
 }
+
+.lineListHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #8a8a8a;
+  flex-shrink: 0;
+}
+
+.lineListHint {
+  text-transform: none;
+  letter-spacing: 0;
+  color: #6f6f6f;
+}
+
+/* Reads as plain text until you click into it. */
+.lineInput {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  color: inherit;
+  font-family: inherit;
+  font-size: 12px;
+  padding: 3px 5px;
+}
+
+.lineInput:hover {
+  border-color: #3a3a3a;
+}
+
+.lineInput:focus {
+  outline: none;
+  background: #1c1c1c;
+  border-color: #5aaaff;
+  color: #fff;
+}

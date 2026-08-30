@@ -562,6 +562,152 @@ export function isLineTimed(line: KaraokeLine): boolean {
   return line.syllables.length > 0 && line.syllables.every((s) => s.end > s.start);
 }
 
+/**
+ * Longest common subsequence over syllable text, as index pairs.
+ *
+ * Used to work out which words survived an edit. Comparing on trimmed text
+ * means a word keeps its timing even when the spacing around it changes.
+ */
+function lcsPairs(a: string[], b: string[]): [number, number][] {
+  const n = a.length;
+  const m = b.length;
+  const table: number[][] = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      table[i][j] =
+        a[i] === b[j] ? table[i + 1][j + 1] + 1 : Math.max(table[i + 1][j], table[i][j + 1]);
+    }
+  }
+  const pairs: [number, number][] = [];
+  let i = 0;
+  let j = 0;
+  while (i < n && j < m) {
+    if (a[i] === b[j]) {
+      pairs.push([i, j]);
+      i++;
+      j++;
+    } else if (table[i + 1][j] >= table[i][j + 1]) {
+      i++;
+    } else {
+      j++;
+    }
+  }
+  return pairs;
+}
+
+/**
+ * Rewrite a line's words while holding on to the timings you already set.
+ *
+ * Words that survive the edit keep their exact start, end and styling; words
+ * you added are given time interpolated from the surviving words either side.
+ * That is what makes it safe to fix a typo or add a word to a line you have
+ * already timed, instead of having to time it again from scratch.
+ */
+export function editLineText(
+  line: KaraokeLine,
+  newText: string,
+  latinMode: LatinMode = 'word'
+): KaraokeLine {
+  const units = segmentLyricLine(newText, latinMode);
+  if (units.length === 0) return { ...line, syllables: [] };
+
+  const oldKeys = line.syllables.map((s) => s.text.trim());
+  const newKeys = units.map((u) => u.trim());
+  const pairs = lcsPairs(oldKeys, newKeys);
+
+  const span = timedSpan(line);
+  const syllables: KaraokeSyllable[] = units.map((text) => ({ text, start: 0, end: 0 }));
+
+  // Carry across everything about a surviving word, not just its timing.
+  const anchored = new Set<number>();
+  for (const [oldIndex, newIndex] of pairs) {
+    const src = line.syllables[oldIndex];
+    syllables[newIndex] = { ...src, text: units[newIndex] };
+    anchored.add(newIndex);
+  }
+
+  if (anchored.size === 0) {
+    // Nothing recognisable survived; spread the new words over the old span.
+    const from = span?.start ?? 0;
+    const to = span?.end ?? from + Math.max(0.6, units.length * 0.33);
+    return distributeEvenly({ ...line, syllables }, from, to);
+  }
+
+  // Fill each unanchored run by sharing the time between its neighbours.
+  const anchorList = [...anchored].sort((x, y) => x - y);
+  const firstAnchor = anchorList[0];
+  const lastAnchor = anchorList[anchorList.length - 1];
+
+  const fillRun = (from: number, to: number, startTime: number, endTime: number) => {
+    const count = to - from;
+    if (count <= 0) return;
+    const step = (endTime - startTime) / count;
+    for (let k = 0; k < count; k++) {
+      const at = startTime + step * k;
+      syllables[from + k] = { ...syllables[from + k], start: at, end: at + step };
+    }
+  };
+
+  // Words added before the first survivor borrow time ahead of it.
+  if (firstAnchor > 0) {
+    const anchor = syllables[firstAnchor];
+    const width = Math.max(0.12, (anchor.end - anchor.start) || 0.25);
+    fillRun(0, firstAnchor, Math.max(0, anchor.start - width * firstAnchor), anchor.start);
+  }
+
+  for (let k = 0; k < anchorList.length - 1; k++) {
+    const a = anchorList[k];
+    const b = anchorList[k + 1];
+    if (b - a > 1) fillRun(a + 1, b, syllables[a].end, syllables[b].start);
+  }
+
+  // Words added after the last survivor extend past it.
+  if (lastAnchor < syllables.length - 1) {
+    const anchor = syllables[lastAnchor];
+    const width = Math.max(0.12, (anchor.end - anchor.start) || 0.25);
+    const trailing = syllables.length - 1 - lastAnchor;
+    fillRun(lastAnchor + 1, syllables.length, anchor.end, anchor.end + width * trailing);
+  }
+
+  return { ...line, syllables };
+}
+
+/**
+ * Split a line in two at `syllableIndex`, the second half becoming a new line
+ * directly below it in the same block.
+ */
+export function splitLineAt(
+  lines: KaraokeLine[],
+  lineIndex: number,
+  syllableIndex: number
+): KaraokeLine[] {
+  const line = lines[lineIndex];
+  if (!line || syllableIndex <= 0 || syllableIndex >= line.syllables.length) return lines;
+
+  const head: KaraokeLine = { ...line, syllables: line.syllables.slice(0, syllableIndex) };
+  const tail: KaraokeLine = {
+    ...line,
+    id: nextLineId(),
+    syllables: line.syllables.slice(syllableIndex),
+  };
+  return [...lines.slice(0, lineIndex), head, tail, ...lines.slice(lineIndex + 1)];
+}
+
+/** Join a line with the one after it, keeping both sets of timings. */
+export function mergeLineWithNext(lines: KaraokeLine[], lineIndex: number): KaraokeLine[] {
+  const line = lines[lineIndex];
+  const next = lines[lineIndex + 1];
+  if (!line || !next) return lines;
+
+  // A line break swallows the space around it, so put one back.
+  const head = [...line.syllables];
+  const last = head[head.length - 1];
+  if (last && !/\s$/.test(last.text)) head[head.length - 1] = { ...last, text: last.text + ' ' };
+
+  const merged: KaraokeLine = { ...line, syllables: [...head, ...next.syllables] };
+  return [...lines.slice(0, lineIndex), merged, ...lines.slice(lineIndex + 2)];
+}
+
 /** Merge syllable at `index` with the one after it, so they sweep as one unit. */
 export function mergeSyllable(line: KaraokeLine, index: number): KaraokeLine {
   if (index < 0 || index >= line.syllables.length - 1) return line;
